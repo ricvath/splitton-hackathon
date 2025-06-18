@@ -2,12 +2,10 @@ import { useEffect, useState } from 'react';
 
 export interface SimpleExpense {
   id: string;
-  description: string;
+  name: string;
   amount: number;
   paidBy: string;
-  sharedBy: string[];
-  timestamp: number;
-  category?: string;
+  date: string;
 }
 
 export interface BalanceResult {
@@ -24,58 +22,46 @@ export const useLocalExpenses = () => {
   const [expenses, setExpenses] = useState<SimpleExpense[]>([]);
   const [participants, setParticipants] = useState<string[]>([]);
 
-  // Load from localStorage on mount
+  // Load data from localStorage on component mount
   useEffect(() => {
-    const savedExpenses = localStorage.getItem('splitton-expenses');
-    if (savedExpenses) {
-      try {
+    try {
+      const savedExpenses = localStorage.getItem('splitton_expenses');
+      const savedParticipants = localStorage.getItem('splitton_participants');
+      
+      if (savedExpenses) {
         setExpenses(JSON.parse(savedExpenses));
-      } catch (error) {
-        console.error('Error loading expenses:', error);
       }
-    }
-    
-    const savedParticipants = localStorage.getItem('splitton-participants');
-    if (savedParticipants) {
-      try {
+      
+      if (savedParticipants) {
         setParticipants(JSON.parse(savedParticipants));
-      } catch (error) {
-        console.error('Error loading participants:', error);
       }
+    } catch (error) {
+      console.error('Error loading data from localStorage:', error);
     }
   }, []);
 
-  // Save to localStorage whenever expenses change
+  // Save data to localStorage whenever it changes
   useEffect(() => {
-    localStorage.setItem('splitton-expenses', JSON.stringify(expenses));
+    try {
+      localStorage.setItem('splitton_expenses', JSON.stringify(expenses));
+    } catch (error) {
+      console.error('Error saving expenses to localStorage:', error);
+    }
   }, [expenses]);
 
-  // Save to localStorage whenever participants change
   useEffect(() => {
-    localStorage.setItem('splitton-participants', JSON.stringify(participants));
+    try {
+      localStorage.setItem('splitton_participants', JSON.stringify(participants));
+    } catch (error) {
+      console.error('Error saving participants to localStorage:', error);
+    }
   }, [participants]);
 
-  const addExpense = (expense: Omit<SimpleExpense, 'id' | 'timestamp'>) => {
-    const newExpense: SimpleExpense = {
-      ...expense,
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-      timestamp: Date.now()
-    };
-    
-    setExpenses(prev => [...prev, newExpense]);
-    
-    // Auto-add participants if they don't exist
-    const allParticipants = new Set([...participants, expense.paidBy, ...expense.sharedBy]);
-    setParticipants(Array.from(allParticipants));
+  const addExpense = (expense: SimpleExpense) => {
+    setExpenses(prev => [...prev, expense]);
   };
 
-  const updateExpense = (id: string, updates: Partial<SimpleExpense>) => {
-    setExpenses(prev => prev.map(expense => 
-      expense.id === id ? { ...expense, ...updates } : expense
-    ));
-  };
-
-  const deleteExpense = (id: string) => {
+  const removeExpense = (id: string) => {
     setExpenses(prev => prev.filter(expense => expense.id !== id));
   };
 
@@ -86,114 +72,58 @@ export const useLocalExpenses = () => {
   };
 
   const removeParticipant = (name: string) => {
-    // Check if participant is used in any expenses
-    const isUsed = expenses.some(expense => 
-      expense.paidBy === name || expense.sharedBy.includes(name)
-    );
-    
-    if (!isUsed) {
-      setParticipants(prev => prev.filter(p => p !== name));
-    }
+    setParticipants(prev => prev.filter(participant => participant !== name));
   };
 
-  // Calculate balances
-  const calculateBalances = (): BalanceResult => {
-    const balances: BalanceResult = {};
-    
-    // Initialize all participants with 0 balance
-    participants.forEach(participant => {
-      balances[participant] = 0;
-    });
+  const calculateBalances = (): Record<string, number> => {
+    if (!participants.length || !expenses.length) {
+      return {};
+    }
 
-    expenses.forEach(expense => {
-      const { amount, paidBy, sharedBy } = expense;
-      const sharePerPerson = amount / sharedBy.length;
-
-      // The person who paid gets credited
-      balances[paidBy] = (balances[paidBy] || 0) + amount;
-
-      // Everyone who shared the expense gets debited
-      sharedBy.forEach(person => {
-        balances[person] = (balances[person] || 0) - sharePerPerson;
+    try {
+      const balances: Record<string, number> = {};
+      
+      // Initialize balances for all participants
+      participants.forEach(participant => {
+        balances[participant] = 0;
       });
-    });
-
-    return balances;
-  };
-
-  // Calculate simplified debts (who owes whom)
-  const calculateDebts = (): DebtResult[] => {
-    const balances = calculateBalances();
-    const debts: DebtResult[] = [];
-    
-    // Separate creditors and debtors
-    const creditors = Object.entries(balances)
-      .filter(([_, balance]) => balance > 0.01)
-      .map(([person, balance]) => ({ person, balance }))
-      .sort((a, b) => b.balance - a.balance);
-    
-    const debtors = Object.entries(balances)
-      .filter(([_, balance]) => balance < -0.01)
-      .map(([person, balance]) => ({ person, balance: Math.abs(balance) }))
-      .sort((a, b) => b.balance - a.balance);
-
-    // Match creditors with debtors
-    let i = 0, j = 0;
-    while (i < creditors.length && j < debtors.length) {
-      const creditor = creditors[i];
-      const debtor = debtors[j];
       
-      const amount = Math.min(creditor.balance, debtor.balance);
-      
-      if (amount > 0.01) {
-        debts.push({
-          from: debtor.person,
-          to: creditor.person,
-          amount: Math.round(amount * 100) / 100
+      // Calculate how much each person paid and owes
+      expenses.forEach(expense => {
+        const { amount, paidBy } = expense;
+        const perPersonAmount = amount / participants.length;
+        
+        // The person who paid gets credit
+        balances[paidBy] += amount;
+        
+        // Everyone owes their share
+        participants.forEach(participant => {
+          balances[participant] -= perPersonAmount;
         });
-      }
+      });
       
-      creditor.balance -= amount;
-      debtor.balance -= amount;
+      // Round to 2 decimal places
+      Object.keys(balances).forEach(person => {
+        balances[person] = parseFloat(balances[person].toFixed(2));
+      });
       
-      if (creditor.balance < 0.01) i++;
-      if (debtor.balance < 0.01) j++;
+      return balances;
+    } catch (error) {
+      console.error('Error calculating balances:', error);
+      return {};
     }
-    
-    return debts;
   };
 
-  const getTotalExpenses = (): number => {
-    return expenses.reduce((total, expense) => total + expense.amount, 0);
-  };
-
-  const getExpensesByParticipant = (participant: string): SimpleExpense[] => {
-    return expenses.filter(expense => 
-      expense.paidBy === participant || expense.sharedBy.includes(participant)
-    );
-  };
-
-  // Reset all data
-  const clearAllData = () => {
-    setExpenses([]);
-    setParticipants([]);
-    localStorage.removeItem('splitton-expenses');
-    localStorage.removeItem('splitton-participants');
-  };
+  const totalExpenses = expenses.reduce((sum, expense) => sum + expense.amount, 0);
 
   return {
     expenses,
     participants,
     addExpense,
-    updateExpense,
-    deleteExpense,
+    removeExpense,
     addParticipant,
     removeParticipant,
-    setParticipants,
-    calculateBalances,
-    calculateDebts,
-    getTotalExpenses,
-    getExpensesByParticipant,
-    clearAllData,
+    balances: calculateBalances(),
+    totalExpenses
   };
 }; 

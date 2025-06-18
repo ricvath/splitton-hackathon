@@ -18,44 +18,54 @@ export const SettlementSuggestion = ({ balances }: SettlementSuggestionProps) =>
 
   // Calculate settlement suggestions
   const calculateSettlements = () => {
+    // Ensure balances is not null or undefined
+    if (!balances || typeof balances !== 'object') {
+      console.warn('Invalid balances object:', balances);
+      return [];
+    }
+    
     const settlements: { from: string; to: string; amount: number }[] = [];
     
-    // Separate debtors and creditors
-    const debtors = Object.entries(balances)
-      .filter(([_, balance]) => balance < 0)
-      .sort((a, b) => a[1] - b[1]); // Sort by amount (ascending)
-    
-    const creditors = Object.entries(balances)
-      .filter(([_, balance]) => balance > 0)
-      .sort((a, b) => b[1] - a[1]); // Sort by amount (descending)
-    
-    let debtorIndex = 0;
-    let creditorIndex = 0;
-    
-    while (debtorIndex < debtors.length && creditorIndex < creditors.length) {
-      const [debtorName, debtorBalance] = debtors[debtorIndex];
-      const [creditorName, creditorBalance] = creditors[creditorIndex];
+    try {
+      // Separate debtors and creditors
+      const debtors = Object.entries(balances)
+        .filter(([_, balance]) => balance < 0)
+        .sort((a, b) => a[1] - b[1]); // Sort by amount (ascending)
       
-      const debtAmount = Math.abs(debtorBalance);
-      const creditAmount = creditorBalance;
+      const creditors = Object.entries(balances)
+        .filter(([_, balance]) => balance > 0)
+        .sort((a, b) => b[1] - a[1]); // Sort by amount (descending)
       
-      const transferAmount = Math.min(debtAmount, creditAmount);
+      let debtorIndex = 0;
+      let creditorIndex = 0;
       
-      if (transferAmount > 0.01) { // Ignore tiny transfers
-        settlements.push({
-          from: debtorName,
-          to: creditorName,
-          amount: parseFloat(transferAmount.toFixed(2))
-        });
+      while (debtorIndex < debtors.length && creditorIndex < creditors.length) {
+        const [debtorName, debtorBalance] = debtors[debtorIndex];
+        const [creditorName, creditorBalance] = creditors[creditorIndex];
+        
+        const debtAmount = Math.abs(debtorBalance);
+        const creditAmount = creditorBalance;
+        
+        const transferAmount = Math.min(debtAmount, creditAmount);
+        
+        if (transferAmount > 0.01) { // Ignore tiny transfers
+          settlements.push({
+            from: debtorName,
+            to: creditorName,
+            amount: parseFloat(transferAmount.toFixed(2))
+          });
+        }
+        
+        // Update balances
+        debtors[debtorIndex] = [debtorName, debtorBalance + transferAmount];
+        creditors[creditorIndex] = [creditorName, creditorBalance - transferAmount];
+        
+        // Move to next person if their balance is settled
+        if (Math.abs(debtors[debtorIndex][1]) < 0.01) debtorIndex++;
+        if (Math.abs(creditors[creditorIndex][1]) < 0.01) creditorIndex++;
       }
-      
-      // Update balances
-      debtors[debtorIndex] = [debtorName, debtorBalance + transferAmount];
-      creditors[creditorIndex] = [creditorName, creditorBalance - transferAmount];
-      
-      // Move to next person if their balance is settled
-      if (Math.abs(debtors[debtorIndex][1]) < 0.01) debtorIndex++;
-      if (Math.abs(creditors[creditorIndex][1]) < 0.01) creditorIndex++;
+    } catch (error) {
+      console.error('Error calculating settlements:', error);
     }
     
     return settlements;

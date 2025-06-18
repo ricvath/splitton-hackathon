@@ -79,7 +79,7 @@ export const HackathonDemo = () => {
 
   // Set up Telegram main button when balances are available
   useEffect(() => {
-    if (isInTelegram && Object.keys(calculateBalances()).length > 0) {
+    if (isInTelegram && calculateBalances() && Object.keys(calculateBalances()).length > 0) {
       showMainButton('Settle Up', () => {
         // Scroll to settlement section
         const settlementSection = document.getElementById('settlement-section');
@@ -135,6 +135,10 @@ export const HackathonDemo = () => {
       </div>
     );
   }
+
+  // Ensure balances is not null
+  const safeBalances = balances || {};
+  const hasBalances = Object.keys(safeBalances).length > 0;
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-md">
@@ -272,7 +276,7 @@ export const HackathonDemo = () => {
       )}
 
       {/* Balances */}
-      {Object.keys(balances).length > 0 && (
+      {hasBalances && (
         <Card className="mb-6">
           <CardHeader className="pb-2">
             <CardTitle className="text-lg">Balances</CardTitle>
@@ -280,7 +284,7 @@ export const HackathonDemo = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {Object.entries(balances).map(([person, balance]) => (
+              {Object.entries(safeBalances).map(([person, balance]) => (
                 <div key={person} className="flex justify-between items-center">
                   <p>{person}</p>
                   <p className={`font-medium ${balance > 0 ? 'text-green-600' : balance < 0 ? 'text-red-600' : ''}`}>
@@ -294,7 +298,7 @@ export const HackathonDemo = () => {
       )}
 
       {/* Settlement suggestions */}
-      {expenses.length > 0 && Object.keys(balances).length > 0 && (
+      {expenses.length > 0 && hasBalances && (
         <>
           <Separator className="my-6" />
           <div id="settlement-section">
