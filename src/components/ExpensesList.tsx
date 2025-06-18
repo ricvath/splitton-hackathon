@@ -14,41 +14,26 @@ interface Expense {
 
 interface ExpensesListProps {
   expenses: Expense[];
-  participantCount: number;
   onAddExpense: () => void;
   onEditExpense: (expense: Expense) => void;
-  currentParticipant: string;
+  onDeleteExpense: (id: string) => void;
 }
 
 const ExpensesList: React.FC<ExpensesListProps> = ({
   expenses,
-  participantCount,
   onAddExpense,
   onEditExpense,
-  currentParticipant
+  onDeleteExpense
 }) => {
   // Helper function to format the split description
   const formatSplitDescription = (expense: Expense) => {
-    const isPaidByCurrentUser = expense.paidBy === currentParticipant;
-    const paidByText = isPaidByCurrentUser ? 'You paid' : `${expense.paidBy} paid`;
+    const paidByText = `${expense.paidBy} paid`;
     
     // Format the split description based on who's sharing
-    if (expense.sharedBy.length === participantCount) {
-      return `${paidByText}, split equally among everyone`;
-    } else if (expense.sharedBy.length === 1) {
-      const isSharedByCurrentUser = expense.sharedBy[0] === currentParticipant;
-      return `${paidByText}, covered by ${isSharedByCurrentUser ? 'you' : expense.sharedBy[0]} only`;
+    if (expense.sharedBy.length === 1) {
+      return `${paidByText}, covered by ${expense.sharedBy[0]} only`;
     } else {
-      const isCurrentUserSharing = expense.sharedBy.includes(currentParticipant);
-      const otherCount = expense.sharedBy.length - (isCurrentUserSharing ? 1 : 0);
-      
-      if (isCurrentUserSharing) {
-        return otherCount > 0 
-          ? `${paidByText}, split between you and ${otherCount} other${otherCount > 1 ? 's' : ''}`
-          : `${paidByText}, covered by you`;
-      } else {
-        return `${paidByText}, split among ${expense.sharedBy.length} people`;
-      }
+      return `${paidByText}, split among ${expense.sharedBy.length} people`;
     }
   };
 
@@ -56,15 +41,13 @@ const ExpensesList: React.FC<ExpensesListProps> = ({
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <h3 className="text-lg font-bold text-black">Expenses</h3>
-        {participantCount > 0 && (
-          <Button
-            onClick={onAddExpense}
-            size="icon"
-            variant="primary"
-          >
-            <Plus />
-          </Button>
-        )}
+        <Button
+          onClick={onAddExpense}
+          size="icon"
+          variant="primary"
+        >
+          <Plus />
+        </Button>
       </div>
 
       {expenses.length === 0 ? (

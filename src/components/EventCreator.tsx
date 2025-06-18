@@ -26,11 +26,19 @@ const EventCreator: React.FC<EventCreatorProps> = ({ onEventCreated }) => {
     try {
       const eventId = generateEventId();
       
+      // Get image URL - either manual or automatic from Unsplash
+      let finalImageUrl = imageUrl.trim() || null;
+      if (!finalImageUrl) {
+        // Generate automatic image from Unsplash
+        const query = encodeURIComponent(eventName.trim());
+        finalImageUrl = `https://source.unsplash.com/800x400/?${query}`;
+      }
+      
       // Create new event
       const newEvent: CloudEvent = {
         id: eventId,
         name: eventName.trim(),
-        imageUrl: imageUrl.trim() || null,
+        imageUrl: finalImageUrl,
         currency: 'USD',
         createdBy: user.id.toString(),
         createdAt: Date.now(),
@@ -104,7 +112,7 @@ const EventCreator: React.FC<EventCreatorProps> = ({ onEventCreated }) => {
               className="w-full h-12 border-2 border-gray-300 focus:border-black font-medium rounded-lg"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Add an image URL for your event
+              Add an image URL or leave empty for an automatic image
             </p>
           </div>
 
