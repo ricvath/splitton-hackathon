@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { calculateBalances } from '@/utils/expenseCalculator';
 import { cloudStorage } from '@/storage/cloudStorage';
@@ -58,29 +58,7 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
   const { user, shareEvent } = useTelegramData();
   const { isConnected: isWalletConnected } = useTonConnect();
 
-  useEffect(() => {
-    fetchAllData();
-
-    // Set up periodic refresh instead of real-time subscriptions
-    const refreshInterval = setInterval(() => {
-      fetchAllData();
-    }, 5000); // Refresh every 5 seconds
-
-    return () => {
-      clearInterval(refreshInterval);
-    };
-  }, [eventId]);
-
-  const fetchAllData = async () => {
-    await Promise.all([
-      fetchEventData(),
-      fetchParticipants(),
-      fetchExpenses()
-    ]);
-    setIsLoading(false);
-  };
-
-  const fetchEventData = async () => {
+  const fetchEventData = useCallback(async () => {
     try {
       let event: CloudEvent | null = null;
       
@@ -100,9 +78,9 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
     } catch (error) {
       console.error('Error fetching event:', error);
     }
-  };
+  }, [eventId]);
 
-  const fetchParticipants = async () => {
+  const fetchParticipants = useCallback(async () => {
     try {
       let event: CloudEvent | null = null;
       
@@ -127,9 +105,9 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
     } catch (error) {
       console.error('Error fetching participants:', error);
     }
-  };
+  }, [eventId]);
 
-  const fetchExpenses = async () => {
+  const fetchExpenses = useCallback(async () => {
     try {
       let event: CloudEvent | null = null;
       
@@ -156,7 +134,29 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
     } catch (error) {
       console.error('Error fetching expenses:', error);
     }
-  };
+  }, [eventId]);
+
+  const fetchAllData = useCallback(async () => {
+    await Promise.all([
+      fetchEventData(),
+      fetchParticipants(),
+      fetchExpenses()
+    ]);
+    setIsLoading(false);
+  }, [fetchEventData, fetchParticipants, fetchExpenses]);
+
+  useEffect(() => {
+    fetchAllData();
+
+    // Set up periodic refresh instead of real-time subscriptions
+    const refreshInterval = setInterval(() => {
+      fetchAllData();
+    }, 5000); // Refresh every 5 seconds
+
+    return () => {
+      clearInterval(refreshInterval);
+    };
+  }, [fetchAllData]);
 
   const addExpense = async () => {
     if (newExpense.description && newExpense.amount && newExpense.paidBy && newExpense.sharedBy.length > 0) {
@@ -458,6 +458,12 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
   }
 
   const balances = calculateBalances(expenses, participants.map(p => p.name));
+  
+  // Convert balances to the format expected by components
+  const balancesArray = Object.entries(balances).map(([participant, balance]) => ({
+    participant,
+    balance
+  }));
 
   return (
     <div className="min-h-screen bg-white">
@@ -474,14 +480,17 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
             <h1 className="text-2xl font-bold mb-2 text-black tracking-tight">
               {eventData.name}
             </h1>
-            <ParticipantChips participants={participants.map(p => p.name)} />
+            <ParticipantChips 
+              participants={participants} 
+              currentParticipant={currentParticipant}
+            />
           </div>
           <Weather eventName={eventData.name} />
         </div>
 
         <PersonalizedSummary 
           currentParticipant={currentParticipant}
-          balances={balances}
+          balances={balancesArray}
         />
 
         <Tabs defaultValue="expenses" className="w-full">
@@ -502,7 +511,7 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
           </TabsContent>
 
           <TabsContent value="balances">
-            <SettlementsSection balances={balances} />
+            <SettlementsSection balances={balancesArray} />
           </TabsContent>
 
           <TabsContent value="settle">
@@ -511,7 +520,6 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
               
               {isWalletConnected && (
                 <SettlementManager 
-                  eventId={eventId}
                   participants={cloudParticipants}
                   balances={balances}
                 />
@@ -530,13 +538,15 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
 
         {showAddExpense && (
           <ExpenseForm
-            expense={newExpense}
-            participants={participants.map(p => p.name)}
+            isOpen={showAddExpense}
+            onClose={handleCloseExpenseForm}
+            onAdd={addExpense}
+            onUpdate={updateExpense}
+            newExpense={newExpense}
             onExpenseChange={setNewExpense}
+            participants={participants}
             onToggleParticipant={toggleParticipant}
-            onSave={editingExpense ? updateExpense : addExpense}
-            onCancel={handleCloseExpenseForm}
-            isEditing={!!editingExpense}
+            isEditMode={!!editingExpense}
           />
         )}
       </div>

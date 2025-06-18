@@ -58,6 +58,8 @@ const EventCreator: React.FC<EventCreatorProps> = ({ onEventCreated }) => {
       // Save to cloud storage (primary)
       try {
         await cloudStorage.saveEvent(newEvent);
+        // Add the creator to their event list
+        await cloudStorage.addUserToEvent(user.id.toString(), eventId);
       } catch (error) {
         console.warn('Cloud storage failed, saving to IndexedDB only:', error);
       }
@@ -65,7 +67,7 @@ const EventCreator: React.FC<EventCreatorProps> = ({ onEventCreated }) => {
       // Save to IndexedDB (fallback)
       await localDB.saveEvent(newEvent);
       
-      // Update user's event list
+      // Update user's event list in IndexedDB too
       const userEvents = await localDB.getUserEvents(user.id.toString());
       await localDB.saveUserEvents(user.id.toString(), [...userEvents, eventId]);
 

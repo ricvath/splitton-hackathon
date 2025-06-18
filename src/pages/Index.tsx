@@ -137,7 +137,7 @@ const Index = () => {
       // Save to both cloud storage and IndexedDB
       try {
         await cloudStorage.saveEvent(newEvent);
-        await cloudStorage.addUserEvent(user.id.toString(), eventId);
+        await cloudStorage.addUserToEvent(user.id.toString(), eventId);
       } catch (error) {
         console.warn('Cloud storage failed, saving to IndexedDB:', error);
       }
