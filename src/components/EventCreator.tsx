@@ -43,6 +43,7 @@ const EventCreator: React.FC<EventCreatorProps> = ({ onEventCreated }) => {
         createdBy: user.id.toString(),
         createdAt: Date.now(),
         lastModified: Date.now(),
+        isActive: true,
         participants: [{
           telegramId: user.id.toString(),
           firstName: user.firstName,
