@@ -10,7 +10,7 @@ const queryClient = new QueryClient();
 // For local development, we'll use localhost
 const isProduction = window.location.hostname !== 'localhost';
 const manifestUrl = isProduction 
-  ? 'https://splitton-hackathon.netlify.app/tonconnect-manifest.json'
+  ? 'https://splitton.netlify.app/tonconnect-manifest.json'
   : 'http://localhost:8080/tonconnect-manifest.json';
 
 const App = () => (
