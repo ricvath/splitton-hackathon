@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { calculateBalances } from '@/utils/expenseCalculator';
-import { supabase } from '@/integrations/supabase/client';
+import { cloudStorage } from '@/storage/cloudStorage';
+import { localDB } from '@/storage/indexedDB';
+import { CloudEvent, CloudExpense, CloudParticipant } from '@/storage/types';
+import { useTelegramData } from '@/hooks/useTelegramData';
 import CoverPhoto from './CoverPhoto';
 import Weather from './Weather';
 import ParticipantChips from './ParticipantChips';
@@ -48,94 +51,47 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
     paidBy: '',
     sharedBy: [] as string[]
   });
+  const { user, shareEvent } = useTelegramData();
 
   useEffect(() => {
-    fetchEventData();
-    fetchParticipants();
-    fetchExpenses();
+    fetchAllData();
 
-    // Set up real-time subscription for participants
-    const participantsChannel = supabase
-      .channel('participants-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'participants',
-          filter: `event_id=eq.${eventId}`
-        },
-        (payload) => {
-          console.log('Participants change detected:', payload);
-          fetchParticipants();
-        }
-      )
-      .subscribe();
+    // Set up periodic refresh instead of real-time subscriptions
+    const refreshInterval = setInterval(() => {
+      fetchAllData();
+    }, 5000); // Refresh every 5 seconds
 
-    // Set up real-time subscription for expenses - all events
-    const expensesChannel = supabase
-      .channel('expenses-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'expenses',
-          filter: `event_id=eq.${eventId}`
-        },
-        (payload) => {
-          console.log(`Expenses ${payload.eventType} detected:`, payload);
-          
-          // Make sure to refresh expenses for all event types (INSERT, UPDATE, DELETE)
-          if (payload.eventType === 'DELETE') {
-            console.log('DELETE operation detected, refreshing expenses');
-          }
-          
-          fetchExpenses();
-        }
-      )
-      .subscribe();
-
-    // Set up specific subscription for delete events to ensure they're captured
-    const expensesDeleteChannel = supabase
-      .channel('expenses-delete-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'expenses',
-          filter: `event_id=eq.${eventId}`
-        },
-        (payload) => {
-          console.log('DELETE specific channel triggered:', payload);
-          fetchExpenses();
-        }
-      )
-      .subscribe();
-
-    // Cleanup subscriptions
     return () => {
-      supabase.removeChannel(participantsChannel);
-      supabase.removeChannel(expensesChannel);
-      supabase.removeChannel(expensesDeleteChannel);
+      clearInterval(refreshInterval);
     };
   }, [eventId]);
 
+  const fetchAllData = async () => {
+    await Promise.all([
+      fetchEventData(),
+      fetchParticipants(),
+      fetchExpenses()
+    ]);
+    setIsLoading(false);
+  };
+
   const fetchEventData = async () => {
     try {
-      const { data, error } = await supabase
-        .from('events')
-        .select('name, image_url')
-        .eq('id', eventId)
-        .single();
-
-      if (error) {
-        console.error('Error fetching event:', error);
-        return;
+      let event: CloudEvent | null = null;
+      
+      try {
+        event = await cloudStorage.getEvent(eventId);
+      } catch (error) {
+        console.warn('Cloud storage unavailable, trying IndexedDB:', error);
+        event = await localDB.getEvent(eventId);
       }
 
-      setEventData(data);
+      if (event) {
+        setEventData({
+          name: event.name,
+          image_url: event.imageUrl,
+        });
+      }
     } catch (error) {
       console.error('Error fetching event:', error);
     }
@@ -143,48 +99,54 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
 
   const fetchParticipants = async () => {
     try {
-      const { data, error } = await supabase
-        .from('participants')
-        .select('id, name')
-        .eq('event_id', eventId)
-        .order('joined_at', { ascending: true });
-
-      if (error) {
-        console.error('Error fetching participants:', error);
-        return;
+      let event: CloudEvent | null = null;
+      
+      try {
+        event = await cloudStorage.getEvent(eventId);
+      } catch (error) {
+        event = await localDB.getEvent(eventId);
       }
 
-      setParticipants(data || []);
+      if (event) {
+        const activeParticipants = event.participants
+          .filter(p => p.isActive)
+          .map(p => ({
+            id: p.telegramId,
+            name: p.firstName + (p.lastName ? ` ${p.lastName}` : ''),
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        
+        setParticipants(activeParticipants);
+      }
     } catch (error) {
       console.error('Error fetching participants:', error);
-    } finally {
-      setIsLoading(false);
     }
   };
 
   const fetchExpenses = async () => {
     try {
-      const { data, error } = await supabase
-        .from('expenses')
-        .select('*')
-        .eq('event_id', eventId)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('Error fetching expenses:', error);
-        return;
+      let event: CloudEvent | null = null;
+      
+      try {
+        event = await cloudStorage.getEvent(eventId);
+      } catch (error) {
+        event = await localDB.getEvent(eventId);
       }
 
-      const formattedExpenses: Expense[] = (data || []).map(expense => ({
-        id: expense.id,
-        description: expense.description,
-        amount: expense.amount,
-        paidBy: expense.paid_by,
-        sharedBy: expense.shared_by,
-        date: new Date(expense.created_at)
-      }));
+      if (event) {
+        const formattedExpenses: Expense[] = event.expenses
+          .map(expense => ({
+            id: expense.id,
+            description: expense.description,
+            amount: expense.amount,
+            paidBy: expense.paidBy,
+            sharedBy: expense.sharedBy,
+            date: new Date(expense.createdAt)
+          }))
+          .sort((a, b) => b.date.getTime() - a.date.getTime());
 
-      setExpenses(formattedExpenses);
+        setExpenses(formattedExpenses);
+      }
     } catch (error) {
       console.error('Error fetching expenses:', error);
     }
@@ -193,21 +155,48 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
   const addExpense = async () => {
     if (newExpense.description && newExpense.amount && newExpense.paidBy && newExpense.sharedBy.length > 0) {
       try {
-        const { error } = await supabase
-          .from('expenses')
-          .insert({
-            event_id: eventId,
-            description: newExpense.description,
-            amount: parseFloat(newExpense.amount),
-            paid_by: newExpense.paidBy,
-            shared_by: newExpense.sharedBy
-          });
+        // Get current event data
+        let event: CloudEvent | null = null;
+        
+        try {
+          event = await cloudStorage.getEvent(eventId);
+        } catch (error) {
+          event = await localDB.getEvent(eventId);
+        }
 
-        if (error) {
-          console.error('Error adding expense:', error);
+        if (!event) {
+          console.error('Event not found');
           return;
         }
 
+        // Create new expense
+        const newCloudExpense: CloudExpense = {
+          id: `expense_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          description: newExpense.description,
+          amount: parseFloat(newExpense.amount),
+          currency: event.currency,
+          paidBy: newExpense.paidBy,
+          sharedBy: newExpense.sharedBy,
+          createdAt: Date.now(),
+          lastModified: Date.now(),
+        };
+
+        // Add expense to event
+        const updatedEvent: CloudEvent = {
+          ...event,
+          expenses: [...event.expenses, newCloudExpense],
+          lastModified: Date.now(),
+        };
+
+        // Save updated event
+        try {
+          await cloudStorage.saveEvent(updatedEvent);
+        } catch (error) {
+          console.warn('Cloud storage failed, saving to IndexedDB:', error);
+        }
+        await localDB.saveEvent(updatedEvent);
+
+        // Reset form and refresh data
         setNewExpense({
           description: '',
           amount: '',
@@ -215,7 +204,7 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
           sharedBy: []
         });
         setShowAddExpense(false);
-        fetchExpenses();
+        await fetchExpenses();
       } catch (error) {
         console.error('Error adding expense:', error);
       }
@@ -223,103 +212,122 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
   };
 
   const updateExpense = async () => {
-    if (editingExpense && newExpense.description && newExpense.amount && newExpense.paidBy && newExpense.sharedBy.length > 0) {
+    if (!editingExpense || !newExpense.description || !newExpense.amount || !newExpense.paidBy || newExpense.sharedBy.length === 0) {
+      return;
+    }
+
+    try {
+      // Get current event data
+      let event: CloudEvent | null = null;
+      
       try {
-        const { error } = await supabase
-          .from('expenses')
-          .update({
-            description: newExpense.description,
-            amount: parseFloat(newExpense.amount),
-            paid_by: newExpense.paidBy,
-            shared_by: newExpense.sharedBy
-          })
-          .eq('id', editingExpense.id);
-
-        if (error) {
-          console.error('Error updating expense:', error);
-          return;
-        }
-
-        setNewExpense({
-          description: '',
-          amount: '',
-          paidBy: '',
-          sharedBy: []
-        });
-        setEditingExpense(null);
-        setShowAddExpense(false);
-        fetchExpenses();
+        event = await cloudStorage.getEvent(eventId);
       } catch (error) {
-        console.error('Error updating expense:', error);
+        event = await localDB.getEvent(eventId);
       }
+
+      if (!event) {
+        console.error('Event not found');
+        return;
+      }
+
+      // Update expense in the array
+      const updatedExpenses = event.expenses.map(expense => 
+        expense.id === editingExpense.id 
+          ? {
+              ...expense,
+              description: newExpense.description,
+              amount: parseFloat(newExpense.amount),
+              paidBy: newExpense.paidBy,
+              sharedBy: newExpense.sharedBy,
+              lastModified: Date.now(),
+            }
+          : expense
+      );
+
+      const updatedEvent: CloudEvent = {
+        ...event,
+        expenses: updatedExpenses,
+        lastModified: Date.now(),
+      };
+
+      // Save updated event
+      try {
+        await cloudStorage.saveEvent(updatedEvent);
+      } catch (error) {
+        console.warn('Cloud storage failed, saving to IndexedDB:', error);
+      }
+      await localDB.saveEvent(updatedEvent);
+
+      // Reset form and refresh data
+      setEditingExpense(null);
+      setNewExpense({
+        description: '',
+        amount: '',
+        paidBy: '',
+        sharedBy: []
+      });
+      setShowAddExpense(false);
+      await fetchExpenses();
+    } catch (error) {
+      console.error('Error updating expense:', error);
     }
   };
 
-  const deleteExpense = async () => {
-    if (editingExpense) {
+  const deleteExpense = async (expenseId: string) => {
+    try {
+      // Get current event data
+      let event: CloudEvent | null = null;
+      
       try {
-        // First update the local state optimistically for immediate UI feedback
-        const updatedExpenses = expenses.filter(expense => expense.id !== editingExpense.id);
-        setExpenses(updatedExpenses);
-        
-        // Close the form immediately for better UX
-        setEditingExpense(null);
-        setShowAddExpense(false);
-        
-        const { error } = await supabase
-          .from('expenses')
-          .delete()
-          .eq('id', editingExpense.id);
-
-        if (error) {
-          console.error('Error deleting expense:', error);
-          // If there's an error, fetch expenses again to restore correct state
-          fetchExpenses();
-          return;
-        }
-
-        setNewExpense({
-          description: '',
-          amount: '',
-          paidBy: '',
-          sharedBy: []
-        });
-        
-        // Fetch expenses again to ensure consistency
-        fetchExpenses();
-        console.log('Expense deleted successfully:', editingExpense.id);
+        event = await cloudStorage.getEvent(eventId);
       } catch (error) {
-        console.error('Error deleting expense:', error);
-        // If there's an exception, fetch expenses again to restore correct state
-        fetchExpenses();
+        event = await localDB.getEvent(eventId);
       }
+
+      if (!event) {
+        console.error('Event not found');
+        return;
+      }
+
+      // Remove expense from the array
+      const updatedExpenses = event.expenses.filter(expense => expense.id !== expenseId);
+
+      const updatedEvent: CloudEvent = {
+        ...event,
+        expenses: updatedExpenses,
+        lastModified: Date.now(),
+      };
+
+      // Save updated event
+      try {
+        await cloudStorage.saveEvent(updatedEvent);
+      } catch (error) {
+        console.warn('Cloud storage failed, saving to IndexedDB:', error);
+      }
+      await localDB.saveEvent(updatedEvent);
+
+      await fetchExpenses();
+    } catch (error) {
+      console.error('Error deleting expense:', error);
     }
   };
 
   const copyInviteUrl = async () => {
+    if (!eventData) return;
+    
     try {
-      const inviteUrl = `${window.location.origin}?event=${eventId}`;
-      await navigator.clipboard.writeText(inviteUrl);
-      // We'll handle the UI feedback in the InviteSection component
-    } catch (error) {
-      console.error("Failed to copy link:", error);
-      // Fallback method for browsers that don't support clipboard API
-      const textarea = document.createElement('textarea');
-      const inviteUrl = `${window.location.origin}?event=${eventId}`;
-      textarea.value = inviteUrl;
-      textarea.style.position = 'fixed'; // Prevent scrolling to bottom
-      document.body.appendChild(textarea);
-      textarea.focus();
-      textarea.select();
-      
-      try {
-        document.execCommand('copy');
-        // UI feedback will be handled in the InviteSection component
-      } catch (err) {
-        console.error('Fallback copy failed:', err);
-      } finally {
-        document.body.removeChild(textarea);
+      // Use Telegram sharing if available
+      if (shareEvent) {
+        shareEvent(eventId, eventData.name);
+      } else {
+        // Fallback to copying URL
+        const inviteUrl = `${window.location.origin}?event=${eventId}`;
+        await navigator.clipboard.writeText(inviteUrl);
+        // You might want to show a toast notification here
       }
+    } catch (error) {
+      console.error('Error sharing event:', error);
     }
   };
 
@@ -327,31 +335,30 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
     setNewExpense(prev => ({
       ...prev,
       sharedBy: prev.sharedBy.includes(participantName)
-        ? prev.sharedBy.filter(p => p !== participantName)
+        ? prev.sharedBy.filter(name => name !== participantName)
         : [...prev.sharedBy, participantName]
     }));
   };
 
   const handleShowAddExpense = () => {
-    const participantNames = participants.map(p => p.name);
+    setEditingExpense(null);
     setNewExpense({
       description: '',
       amount: '',
       paidBy: currentParticipant,
-      sharedBy: participantNames
+      sharedBy: []
     });
-    setEditingExpense(null);
     setShowAddExpense(true);
   };
 
   const handleEditExpense = (expense: Expense) => {
+    setEditingExpense(expense);
     setNewExpense({
       description: expense.description,
       amount: expense.amount.toString(),
       paidBy: expense.paidBy,
       sharedBy: expense.sharedBy
     });
-    setEditingExpense(expense);
     setShowAddExpense(true);
   };
 
@@ -366,107 +373,103 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
     });
   };
 
-  const participantNames = participants.map(p => p.name);
-  const balances = calculateBalances(expenses, participantNames);
-
   const handleImageUpdate = (newImageUrl: string) => {
-    setEventData(prev => prev ? { ...prev, image_url: newImageUrl } : null);
+    if (eventData) {
+      setEventData({
+        ...eventData,
+        image_url: newImageUrl
+      });
+    }
   };
 
-  if (isLoading || !eventData) {
+  if (isLoading) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
-        <div className="text-black font-medium">LOADING...</div>
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading event...</p>
+        </div>
       </div>
     );
   }
 
-  const currentBalance = balances[currentParticipant] || 0;
+  if (!eventData) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <p className="text-gray-600">Event not found</p>
+        </div>
+      </div>
+    );
+  }
+
+  const balances = calculateBalances(expenses, participants.map(p => p.name));
 
   return (
     <div className="min-h-screen bg-white">
-      <div className="w-full px-4 py-4 mx-auto sm:max-w-md">
+      <div className="max-w-md mx-auto p-4">
         <CoverPhoto 
           eventId={eventId}
           eventName={eventData.name}
           imageUrl={eventData.image_url}
           onImageUpdate={handleImageUpdate}
         />
-        
-        <div className="mb-6">
-          <div className="flex justify-between items-start">
-            <div className="flex-1 min-w-0">
-              <h1 className="text-2xl font-bold text-black tracking-tight mb-1 break-words">
-                {eventData.name}
-              </h1>
-              <div className="leading-[130%]">
-                <ParticipantChips 
-                  participants={participants}
-                  currentParticipant={currentParticipant}
-                />
-              </div>
-            </div>
-            <div className="ml-2 flex-shrink-0">
-              <Weather eventName={eventData.name} />
-            </div>
+
+        <div className="flex justify-between items-start mb-6">
+          <div>
+            <h1 className="text-2xl font-bold mb-2 text-black tracking-tight">
+              {eventData.name}
+            </h1>
+            <ParticipantChips participants={participants.map(p => p.name)} />
           </div>
+          <Weather eventName={eventData.name} />
         </div>
 
-        <PersonalizedSummary
+        <PersonalizedSummary 
           currentParticipant={currentParticipant}
-          participantCount={participants.length}
-          balance={currentBalance}
-          eventId={eventId}
-          onCopyInvite={copyInviteUrl}
+          balances={balances}
         />
 
         <Tabs defaultValue="expenses" className="w-full">
-          <TabsList className="grid w-full grid-cols-3 mb-2">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="expenses">Expenses</TabsTrigger>
-            <TabsTrigger value="settlements">Settle</TabsTrigger>
-            <TabsTrigger value="invite">Buddies</TabsTrigger>
+            <TabsTrigger value="balances">Balances</TabsTrigger>
+            <TabsTrigger value="invite">Invite</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="expenses" className="space-y-4 pt-2">
+          <TabsContent value="expenses">
             <ExpensesList 
               expenses={expenses}
-              participantCount={participants.length}
-              onAddExpense={handleShowAddExpense}
               onEditExpense={handleEditExpense}
-              currentParticipant={currentParticipant}
+              onDeleteExpense={deleteExpense}
+              onAddExpense={handleShowAddExpense}
             />
           </TabsContent>
 
-          <TabsContent value="settlements" className="space-y-4 pt-2">
-            <SettlementsSection 
-              participants={participants}
-              balances={balances}
-              currentParticipant={currentParticipant}
-            />
+          <TabsContent value="balances">
+            <SettlementsSection balances={balances} />
           </TabsContent>
 
-          <TabsContent value="invite" className="space-y-4 pt-2">
+          <TabsContent value="invite">
             <InviteSection 
               eventId={eventId}
-              participants={participants}
-              currentParticipant={currentParticipant}
-              onCopyInvite={copyInviteUrl}
+              eventName={eventData.name}
+              onCopyInviteUrl={copyInviteUrl}
             />
           </TabsContent>
         </Tabs>
 
-        <ExpenseForm 
-          isOpen={showAddExpense}
-          onClose={handleCloseExpenseForm}
-          onAdd={addExpense}
-          onUpdate={updateExpense}
-          onDelete={deleteExpense}
-          newExpense={newExpense}
-          onExpenseChange={setNewExpense}
-          participants={participants}
-          onToggleParticipant={toggleParticipant}
-          isEditMode={editingExpense !== null}
-        />
+        {showAddExpense && (
+          <ExpenseForm
+            expense={newExpense}
+            participants={participants.map(p => p.name)}
+            onExpenseChange={setNewExpense}
+            onToggleParticipant={toggleParticipant}
+            onSave={editingExpense ? updateExpense : addExpense}
+            onCancel={handleCloseExpenseForm}
+            isEditing={!!editingExpense}
+          />
+        )}
       </div>
     </div>
   );

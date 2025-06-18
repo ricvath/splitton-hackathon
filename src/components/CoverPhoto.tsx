@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Shuffle, Upload } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
 
 interface CoverPhotoProps {
@@ -30,37 +29,14 @@ const CoverPhoto: React.FC<CoverPhotoProps> = ({
   const fetchUnsplashImage = async () => {
     setIsLoading(true);
     try {
-      console.log('Fetching Unsplash image for:', eventName);
-      const { data, error } = await supabase.functions.invoke('unsplash-image', {
-        body: { query: eventName }
-      });
-
-      if (error) {
-        console.error('Error fetching Unsplash image:', error);
-        return;
-      }
-
-      if (data?.imageUrl) {
-        console.log('Received image URL:', data.imageUrl);
-        
-        // Update local state immediately for better UX
-        setLocalImageUrl(data.imageUrl);
-        
-        // Update the event with the new image URL
-        const { error: updateError } = await supabase
-          .from('events')
-          .update({ image_url: data.imageUrl })
-          .eq('id', eventId);
-
-        if (updateError) {
-          console.error('Error updating event image:', updateError);
-          return;
-        }
-
-        onImageUpdate(data.imageUrl);
-      } else {
-        console.error('No image URL received from Unsplash');
-      }
+      // For now, use a placeholder image service
+      // In the future, you could implement this with a serverless function
+      const query = encodeURIComponent(eventName);
+      const imageUrl = `https://source.unsplash.com/800x400/?${query}`;
+      
+      // Update local state immediately for better UX
+      setLocalImageUrl(imageUrl);
+      onImageUpdate(imageUrl);
     } catch (error) {
       console.error('Error fetching image:', error);
     } finally {
@@ -74,37 +50,15 @@ const CoverPhoto: React.FC<CoverPhotoProps> = ({
 
     setIsLoading(true);
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${eventId}/cover.${fileExt}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('event-images')
-        .upload(fileName, file, { upsert: true });
-
-      if (uploadError) {
-        console.error('Error uploading file:', uploadError);
-        return;
-      }
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('event-images')
-        .getPublicUrl(fileName);
-
+      // Create a local URL for the uploaded file
+      const localUrl = URL.createObjectURL(file);
+      
       // Update local state immediately
-      setLocalImageUrl(publicUrl);
-
-      // Update the event with the new image URL
-      const { error: updateError } = await supabase
-        .from('events')
-        .update({ image_url: publicUrl })
-        .eq('id', eventId);
-
-      if (updateError) {
-        console.error('Error updating event image:', updateError);
-        return;
-      }
-
-      onImageUpdate(publicUrl);
+      setLocalImageUrl(localUrl);
+      onImageUpdate(localUrl);
+      
+      // Note: In a production app, you'd want to upload this to a proper storage service
+      // For now, we'll just use the local blob URL
     } catch (error) {
       console.error('Error uploading image:', error);
     } finally {

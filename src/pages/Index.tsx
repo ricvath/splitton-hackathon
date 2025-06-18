@@ -3,8 +3,11 @@ import { useSearchParams } from 'react-router-dom';
 import Home from '@/components/Home';
 import ParticipantSelector from '@/components/ParticipantSelector';
 import EventManager from '@/components/EventManager';
-import { supabase } from '@/integrations/supabase/client';
 import { generateEventId } from '@/utils/expenseCalculator';
+import { useTelegramData } from '@/hooks/useTelegramData';
+import { cloudStorage } from '@/storage/cloudStorage';
+import { localDB } from '@/storage/indexedDB';
+import { CloudEvent, CloudParticipant } from '@/storage/types';
 
 type AppState = 'home' | 'participant-select' | 'event';
 
@@ -15,54 +18,85 @@ const Index = () => {
   const [currentEventImageUrl, setCurrentEventImageUrl] = useState<string | null>(null);
   const [currentParticipant, setCurrentParticipant] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
+  const { user, startParam, isAvailable } = useTelegramData();
 
   useEffect(() => {
+    // Handle Telegram start parameter (event invitation)
+    if (startParam) {
+      setCurrentEventId(startParam);
+      checkEventAndParticipant(startParam);
+      return;
+    }
+
+    // Handle URL parameter
     const eventId = searchParams.get('event');
     if (eventId) {
       setCurrentEventId(eventId);
       checkEventAndParticipant(eventId);
     }
-  }, [searchParams]);
+  }, [searchParams, startParam]);
 
-  const getCookieValue = (name: string): string | null => {
-    const value = `; ${document.cookie}`;
-    const parts = value.split(`; ${name}=`);
-    if (parts.length === 2) return parts.pop()?.split(';').shift() || null;
-    return null;
+  const getStoredParticipant = (eventId: string): string | null => {
+    if (!user) return null;
+    
+    // In Web3 version, we use Telegram user ID as the participant identifier
+    // But we still need to check if they're actually part of this event
+    return localStorage.getItem(`participant_${eventId}_${user.id}`);
+  };
+
+  const storeParticipant = (eventId: string, participantName: string) => {
+    if (!user) return;
+    localStorage.setItem(`participant_${eventId}_${user.id}`, participantName);
   };
 
   const checkEventAndParticipant = async (eventId: string) => {
     try {
-      // First check if event exists
-      const { data: eventData, error: eventError } = await supabase
-        .from('events')
-        .select('name, image_url')
-        .eq('id', eventId)
-        .single();
+      // Try to get event from cloud storage first, then fallback to IndexedDB
+      let eventData: CloudEvent | null = null;
+      
+      try {
+        eventData = await cloudStorage.getEvent(eventId);
+      } catch (error) {
+        console.warn('Cloud storage unavailable, trying IndexedDB:', error);
+        eventData = await localDB.getEvent(eventId);
+      }
 
-      if (eventError || !eventData) {
+      if (!eventData || !eventData.isActive) {
         setAppState('home');
         setSearchParams({});
         return;
       }
 
       setCurrentEventName(eventData.name);
-      setCurrentEventImageUrl(eventData.image_url);
+      setCurrentEventImageUrl(eventData.imageUrl || null);
 
-      // Check if user has a participant cookie for this event
-      const participantName = getCookieValue(`participant_${eventId}`);
-      
-      if (participantName) {
-        // Verify the participant still exists in the database
-        const { data: participantData } = await supabase
-          .from('participants')
-          .select('name')
-          .eq('event_id', eventId)
-          .eq('name', participantName)
-          .single();
+      if (!user) {
+        // If no Telegram user, go to participant selector
+        setAppState('participant-select');
+        return;
+      }
 
-        if (participantData) {
-          setCurrentParticipant(participantName);
+      // Check if user is already a participant in this event
+      const existingParticipant = eventData.participants.find(
+        p => p.telegramId === user.id.toString() && p.isActive
+      );
+
+      if (existingParticipant) {
+        setCurrentParticipant(existingParticipant.firstName);
+        setAppState('event');
+        return;
+      }
+
+      // Check if user has a stored participant name for this event
+      const storedParticipantName = getStoredParticipant(eventId);
+      if (storedParticipantName) {
+        // Verify this participant name is still valid for this event
+        const participantExists = eventData.participants.find(
+          p => p.firstName === storedParticipantName && p.isActive
+        );
+        
+        if (participantExists) {
+          setCurrentParticipant(storedParticipantName);
           setAppState('event');
           return;
         }
@@ -79,20 +113,38 @@ const Index = () => {
 
   const handleCreateEvent = async (eventName: string, initialImageUrl?: string) => {
     try {
-      const eventId = generateEventId();
-      
-      const { error } = await supabase
-        .from('events')
-        .insert({
-          id: eventId,
-          name: eventName,
-          image_url: initialImageUrl
-        });
-
-      if (error) {
-        console.error('Error creating event:', error);
+      if (!user) {
+        console.error('No user available for event creation');
         return;
       }
+
+      const eventId = generateEventId();
+      
+      const newEvent: CloudEvent = {
+        id: eventId,
+        name: eventName,
+        description: '',
+        createdBy: user.id.toString(),
+        participants: [],
+        expenses: [],
+        imageUrl: initialImageUrl,
+        currency: 'USD', // Default currency, can be changed later
+        createdAt: Date.now(),
+        lastModified: Date.now(),
+        isActive: true,
+      };
+
+      // Save to both cloud storage and IndexedDB
+      try {
+        await cloudStorage.saveEvent(newEvent);
+        await cloudStorage.addUserEvent(user.id.toString(), eventId);
+      } catch (error) {
+        console.warn('Cloud storage failed, saving to IndexedDB:', error);
+      }
+      
+      await localDB.saveEvent(newEvent);
+      const userEvents = await localDB.getUserEvents(user.id.toString());
+      await localDB.saveUserEvents(user.id.toString(), [...userEvents, eventId]);
 
       setCurrentEventId(eventId);
       setCurrentEventName(eventName);
@@ -105,6 +157,9 @@ const Index = () => {
   };
 
   const handleParticipantSelected = (participantName: string) => {
+    if (currentEventId && user) {
+      storeParticipant(currentEventId, participantName);
+    }
     setCurrentParticipant(participantName);
     setAppState('event');
   };

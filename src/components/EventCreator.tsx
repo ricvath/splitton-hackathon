@@ -1,10 +1,13 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Check, Upload, Clock } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { Check, Clock } from 'lucide-react';
 import { generateEventId } from '@/utils/expenseCalculator';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { cloudStorage } from '@/storage/cloudStorage';
+import { localDB } from '@/storage/indexedDB';
+import { CloudEvent } from '@/storage/types';
+import { useTelegramData } from '@/hooks/useTelegramData';
 
 interface EventCreatorProps {
   onEventCreated: (eventId: string) => void;
@@ -14,51 +17,48 @@ const EventCreator: React.FC<EventCreatorProps> = ({ onEventCreated }) => {
   const [eventName, setEventName] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-
-  const fetchUnsplashImage = async (query: string) => {
-    try {
-      const { data, error } = await supabase.functions.invoke('unsplash-image', {
-        body: { query }
-      });
-
-      if (error) {
-        console.error('Error fetching Unsplash image:', error);
-        return null;
-      }
-
-      return data?.imageUrl || null;
-    } catch (error) {
-      console.error('Error fetching image:', error);
-      return null;
-    }
-  };
+  const { user } = useTelegramData();
 
   const handleCreate = async () => {
-    if (!eventName.trim()) return;
+    if (!eventName.trim() || !user) return;
     
     setIsLoading(true);
     try {
       const eventId = generateEventId();
       
-      // If no image URL was manually entered, try to fetch one from Unsplash
-      let finalImageUrl = imageUrl.trim();
-      if (!finalImageUrl) {
-        console.log('Fetching automatic image for:', eventName);
-        finalImageUrl = await fetchUnsplashImage(eventName.trim()) || null;
-      }
-      
-      const { error } = await supabase
-        .from('events')
-        .insert({
-          id: eventId,
-          name: eventName.trim(),
-          image_url: finalImageUrl
-        });
+      // Create new event
+      const newEvent: CloudEvent = {
+        id: eventId,
+        name: eventName.trim(),
+        imageUrl: imageUrl.trim() || null,
+        currency: 'USD',
+        createdBy: user.id.toString(),
+        createdAt: Date.now(),
+        lastModified: Date.now(),
+        participants: [{
+          telegramId: user.id.toString(),
+          firstName: user.firstName,
+          lastName: user.lastName || '',
+          username: user.username || '',
+          isActive: true,
+          joinedAt: Date.now(),
+        }],
+        expenses: [],
+      };
 
-      if (error) {
-        console.error('Error creating event:', error);
-        return;
+      // Save to cloud storage (primary)
+      try {
+        await cloudStorage.saveEvent(newEvent);
+      } catch (error) {
+        console.warn('Cloud storage failed, saving to IndexedDB only:', error);
       }
+
+      // Save to IndexedDB (fallback)
+      await localDB.saveEvent(newEvent);
+      
+      // Update user's event list
+      const userEvents = await localDB.getUserEvents(user.id.toString());
+      await localDB.saveUserEvents(user.id.toString(), [...userEvents, eventId]);
 
       onEventCreated(eventId);
     } catch (error) {
@@ -68,7 +68,7 @@ const EventCreator: React.FC<EventCreatorProps> = ({ onEventCreated }) => {
     }
   };
 
-  const canCreate = eventName.trim() && !isLoading;
+  const canCreate = eventName.trim() && user && !isLoading;
 
   return (
     <div className="min-h-screen bg-white p-4">
@@ -89,8 +89,7 @@ const EventCreator: React.FC<EventCreatorProps> = ({ onEventCreated }) => {
               value={eventName} 
               onChange={(e) => setEventName(e.target.value)} 
               placeholder="e.g., Trip to NYC" 
-              className="w-full h-12 border-2 border-gray-300 focus:border-black font-medium"
-              variant="rounded"
+              className="w-full h-12 border-2 border-gray-300 focus:border-black font-medium rounded-lg"
             />
           </div>
 
@@ -102,18 +101,17 @@ const EventCreator: React.FC<EventCreatorProps> = ({ onEventCreated }) => {
               value={imageUrl} 
               onChange={(e) => setImageUrl(e.target.value)} 
               placeholder="https://example.com/image.jpg" 
-              className="w-full h-12 border-2 border-gray-300 focus:border-black font-medium"
-              variant="rounded"
+              className="w-full h-12 border-2 border-gray-300 focus:border-black font-medium rounded-lg"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Add an image URL or leave empty for an automatic image
+              Add an image URL for your event
             </p>
           </div>
 
           <Alert className="bg-gray-50 border border-gray-200">
             <Clock className="h-4 w-4" />
             <AlertDescription className="text-xs text-gray-600">
-              Events and all associated data are automatically deleted after 30 days of inactivity to save storage space.
+              Events are stored in Telegram Cloud Storage and locally for offline access.
             </AlertDescription>
           </Alert>
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Check, Users } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+// Removed Supabase import - now using Web3 storage
 
 interface JoinEventProps {
   eventId: string;

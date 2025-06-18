@@ -2,7 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Check, Users, User } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { cloudStorage } from '@/storage/cloudStorage';
+import { localDB } from '@/storage/indexedDB';
+import { CloudEvent, CloudParticipant } from '@/storage/types';
+import { useTelegramData } from '@/hooks/useTelegramData';
 import CoverPhoto from './CoverPhoto';
 import Weather from './Weather';
 
@@ -29,33 +32,44 @@ const ParticipantSelector: React.FC<ParticipantSelectorProps> = ({
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [newParticipantName, setNewParticipantName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const { user } = useTelegramData();
 
   useEffect(() => {
     fetchParticipants();
-  }, [eventId]);
+    
+    // Pre-fill with Telegram user's first name if available
+    if (user && !newParticipantName) {
+      setNewParticipantName(user.firstName);
+    }
+  }, [eventId, user]);
 
   const fetchParticipants = async () => {
     try {
-      const { data, error } = await supabase
-        .from('participants')
-        .select('id, name')
-        .eq('event_id', eventId)
-        .order('joined_at', { ascending: true });
-
-      if (error) {
-        console.error('Error fetching participants:', error);
-        return;
+      // Try cloud storage first, fallback to IndexedDB
+      let eventData: CloudEvent | null = null;
+      
+      try {
+        eventData = await cloudStorage.getEvent(eventId);
+      } catch (error) {
+        console.warn('Cloud storage unavailable, trying IndexedDB:', error);
+        eventData = await localDB.getEvent(eventId);
       }
 
-      setParticipants(data || []);
+      if (eventData) {
+        const activeParticipants = eventData.participants
+          .filter(p => p.isActive)
+          .map(p => ({
+            id: p.telegramId,
+            name: p.firstName + (p.lastName ? ` ${p.lastName}` : ''),
+          }));
+        setParticipants(activeParticipants);
+      }
     } catch (error) {
       console.error('Error fetching participants:', error);
     }
   };
 
   const handleSelectExisting = (participantName: string) => {
-    // Store in cookie
-    document.cookie = `participant_${eventId}=${participantName}; path=/; max-age=${30 * 24 * 60 * 60}`; // 30 days
     onParticipantSelected(participantName);
   };
 
@@ -64,20 +78,56 @@ const ParticipantSelector: React.FC<ParticipantSelectorProps> = ({
     
     setIsLoading(true);
     try {
-      const { error } = await supabase
-        .from('participants')
-        .insert({
-          event_id: eventId,
-          name: newParticipantName.trim()
-        });
+      // Get current event data
+      let eventData: CloudEvent | null = null;
+      
+      try {
+        eventData = await cloudStorage.getEvent(eventId);
+      } catch (error) {
+        eventData = await localDB.getEvent(eventId);
+      }
 
-      if (error) {
-        console.error('Error creating participant:', error);
+      if (!eventData) {
+        console.error('Event not found');
         return;
       }
 
-      // Store in cookie
-      document.cookie = `participant_${eventId}=${newParticipantName.trim()}; path=/; max-age=${30 * 24 * 60 * 60}`; // 30 days
+      // Create new participant
+      const newParticipant: CloudParticipant = {
+        telegramId: user?.id.toString() || `temp_${Date.now()}`,
+        username: user?.username,
+        firstName: newParticipantName.trim(),
+        lastName: user?.lastName,
+        walletAddress: undefined, // Will be set when user connects wallet
+        joinedAt: Date.now(),
+        isActive: true,
+      };
+
+      // Add participant to event
+      const updatedEvent: CloudEvent = {
+        ...eventData,
+        participants: [...eventData.participants, newParticipant],
+        lastModified: Date.now(),
+      };
+
+      // Save updated event to both storages
+      try {
+        await cloudStorage.saveEvent(updatedEvent);
+        if (user) {
+          await cloudStorage.addUserEvent(user.id.toString(), eventId);
+        }
+      } catch (error) {
+        console.warn('Cloud storage failed, saving to IndexedDB:', error);
+      }
+      
+      await localDB.saveEvent(updatedEvent);
+      if (user) {
+        const userEvents = await localDB.getUserEvents(user.id.toString());
+        if (!userEvents.includes(eventId)) {
+          await localDB.saveUserEvents(user.id.toString(), [...userEvents, eventId]);
+        }
+      }
+
       onParticipantSelected(newParticipantName.trim());
     } catch (error) {
       console.error('Error creating participant:', error);
@@ -143,7 +193,7 @@ const ParticipantSelector: React.FC<ParticipantSelectorProps> = ({
               onChange={(e) => setNewParticipantName(e.target.value)} 
               placeholder="Username (e.g., Vicky)" 
               className="w-full font-medium"
-              variant="rounded"
+          
               onKeyPress={(e) => e.key === 'Enter' && handleCreateNew()}
             />
 
