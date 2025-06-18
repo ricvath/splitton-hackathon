@@ -23,25 +23,49 @@ export const useTelegramData = () => {
       const isAvailable = telegramWebApp.isAvailable();
       
       if (isAvailable) {
-        const initialized = telegramWebApp.init();
+        console.log('Telegram WebApp is available, initializing...');
         
-        if (initialized) {
-          setTelegramData({
-            user: telegramWebApp.getUser(),
-            chat: telegramWebApp.getChat(),
-            startParam: telegramWebApp.getStartParam(),
-            isAvailable: true,
-            isReady: true,
-          });
-          return true; // Successfully initialized
-        } else {
+        try {
+          const initialized = telegramWebApp.init();
+          
+          if (initialized) {
+            console.log('Telegram WebApp initialized successfully');
+            
+            setTelegramData({
+              user: telegramWebApp.getUser(),
+              chat: telegramWebApp.getChat(),
+              startParam: telegramWebApp.getStartParam(),
+              isAvailable: true,
+              isReady: true,
+            });
+            return true;
+          } else {
+            console.warn('Telegram WebApp initialization returned false');
+            
+            // Even if init returns false, we can still try to get data
+            setTelegramData({
+              user: telegramWebApp.getUser(),
+              chat: telegramWebApp.getChat(),
+              startParam: telegramWebApp.getStartParam(),
+              isAvailable: true,
+              isReady: true, // Set ready to true anyway
+            });
+            return true;
+          }
+        } catch (error) {
+          console.error('Error during Telegram WebApp initialization:', error);
+          
+          // Set ready to true even on error to avoid infinite loading
           setTelegramData(prev => ({
             ...prev,
             isAvailable: true,
-            isReady: false,
+            isReady: true,
           }));
+          return true;
         }
       } else {
+        console.log('Telegram WebApp not available, using development mode');
+        
         // For development/testing outside Telegram
         setTelegramData({
           user: {
@@ -56,19 +80,22 @@ export const useTelegramData = () => {
           isAvailable: false,
           isReady: true,
         });
-        return true; // Ready for development
+        return true;
       }
-      return false;
     };
 
     // Try to initialize immediately
     const success = initTelegram();
     
-    // If not successful and we're in a Telegram environment, try once more after a brief delay
-    if (!success && typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
+    // If not successful, set a timeout to ensure we don't get stuck
+    if (!success) {
       const timeoutId = setTimeout(() => {
-        initTelegram();
-      }, 500);
+        console.log('Timeout reached, forcing ready state');
+        setTelegramData(prev => ({
+          ...prev,
+          isReady: true,
+        }));
+      }, 3000); // 3 second timeout
 
       return () => {
         clearTimeout(timeoutId);
@@ -77,11 +104,19 @@ export const useTelegramData = () => {
   }, []);
 
   const shareEvent = (eventId: string, eventName: string) => {
-    telegramWebApp.shareEvent(eventId, eventName);
+    try {
+      telegramWebApp.shareEvent(eventId, eventName);
+    } catch (error) {
+      console.error('Failed to share event:', error);
+    }
   };
 
   const closeTelegram = () => {
-    telegramWebApp.close();
+    try {
+      telegramWebApp.close();
+    } catch (error) {
+      console.error('Failed to close Telegram:', error);
+    }
   };
 
   return {
