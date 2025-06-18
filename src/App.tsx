@@ -1,23 +1,34 @@
+import { Toaster } from "@/components/ui/toaster";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { TonConnectUIProvider } from '@tonconnect/ui-react';
-import { HackathonDemo } from './components/HackathonDemo';
-import './App.css';
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import Index from "./pages/Index";
+import NotFound from "./pages/NotFound";
+import Navbar from "./components/ui/Navbar";
+import Footer from "./components/ui/Footer";
 
 const queryClient = new QueryClient();
 
-// TON Connect manifest URL
-// For production Telegram bot, we'll use the deployed URL
-// For local development, we'll use localhost
-const isProduction = window.location.hostname !== 'localhost';
-const manifestUrl = isProduction 
-  ? 'https://splitton.netlify.app/tonconnect-manifest.json'
-  : 'http://localhost:8080/tonconnect-manifest.json';
-
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TonConnectUIProvider manifestUrl={manifestUrl}>
-      <HackathonDemo />
-    </TonConnectUIProvider>
+    <TooltipProvider>
+      <Toaster />
+      <Sonner />
+      <BrowserRouter>
+        <div className="flex flex-col min-h-screen">
+          <Navbar />
+          <div className="flex-1">
+            <Routes>
+              <Route path="/" element={<Index />} />
+              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </div>
+          <Footer />
+        </div>
+      </BrowserRouter>
+    </TooltipProvider>
   </QueryClientProvider>
 );
 

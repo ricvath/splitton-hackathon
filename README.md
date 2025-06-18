@@ -4,11 +4,11 @@
 
 SplitTON is a Telegram Mini App that starts as a familiar expense splitting tool but naturally introduces users to TON wallets when they're ready to settle. Built for the TON hackathon to showcase seamless Web2→Web3 onboarding.
 
-## 🎯 Hackathon Value Proposition
+## 🎯 User Journey
 
-**The Story**: Users join via Telegram, track expenses like any normal app, then discover TON wallets when ready to settle. It's the perfect crypto onboarding experience - no complexity upfront, powerful Web3 features when needed.
+Folks join via Telegram, track expenses like any normal app, then discover TON wallets when ready to settle. It's the perfect crypto onboarding experience - no complexity upfront, powerful Web3 features when needed.
 
-## ⚡ Demo Flow (2 minutes)
+## ⚡ Demo (2 mins)
 
 1. **"Look, normal expense tracking"** - Add expenses, split with friends
 2. **"But here's the magic"** - Click "Settle" tab
@@ -68,7 +68,7 @@ npm run build
 - **Storage**: LocalStorage (hackathon-optimized)
 - **Deployment**: Netlify
 
-## 🏆 Hackathon Highlights
+## 🏆 Highlights
 
 ### **TON Integration** ✨
 - Uses official TON Connect 2.0
@@ -100,26 +100,3 @@ npm run build
 ```
 
 Update the manifest URL in `src/App.tsx` with your deployed domain.
-
-## 🎭 Demo Script for Judges
-
-> *"This solves a real problem everyone has - splitting expenses. But instead of using Venmo or PayPal, users discover TON wallets naturally when they need to settle up. It's the perfect Web2→Web3 onboarding experience, and it spreads organically through Telegram groups."*
-
-1. Show normal expense entry (Web2 familiar)
-2. Add a few demo expenses
-3. Switch to "Settle" tab - **this is the magic moment**
-4. Connect TON wallet - show the onboarding
-5. Display settlement suggestions - **Web3 power revealed**
-6. Share with friends - **growth mechanism**
-
-## 📊 Success Metrics
-
-- ✅ **Functional TWA** running in Telegram
-- ✅ **TON Connect** wallet integration working
-- ✅ **Settlement flow** showcasing Web3 utility
-- ✅ **Sharing mechanism** for viral growth
-- ✅ **Clean demo** ready for presentation
-
----
-
-**Built for TON Hackathon** | **Web2→Web3 Onboarding** | **Telegram Native** | **Real Utility** ⚡
