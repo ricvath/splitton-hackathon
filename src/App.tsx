@@ -72,8 +72,7 @@ const AppContent = () => {
         <Navbar />
         <div className="flex-1">
           <Routes>
-            <Route path="/" element={<TestPage />} />
-            <Route path="/main" element={<Index />} />
+            <Route path="/" element={<Index />} />
             <Route path="/test" element={<TestPage />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />

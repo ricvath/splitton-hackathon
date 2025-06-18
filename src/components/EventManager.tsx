@@ -5,7 +5,7 @@ import { cloudStorage } from '@/storage/cloudStorage';
 import { localDB } from '@/storage/indexedDB';
 import { CloudEvent, CloudExpense, CloudParticipant } from '@/storage/types';
 import { useTelegramData } from '@/hooks/useTelegramData';
-// import { useTonConnect } from '@/hooks/useTonConnect';
+import { useTonConnect } from '@/hooks/useTonConnect';
 import CoverPhoto from './CoverPhoto';
 import Weather from './Weather';
 import ParticipantChips from './ParticipantChips';
@@ -14,8 +14,8 @@ import ExpenseForm from './ExpenseForm';
 import ExpensesList from './ExpensesList';
 import SettlementsSection from './SettlementsSection';
 import InviteSection from './InviteSection';
-// import { TonWalletConnect } from './TonWalletConnect';
-// import { SettlementManager } from './SettlementManager';
+import { TonWalletConnect } from './TonWalletConnect';
+import { SettlementManager } from './SettlementManager';
 
 interface Expense {
   id: string;
@@ -56,7 +56,7 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
     sharedBy: [] as string[]
   });
   const { user, shareEvent } = useTelegramData();
-  // const { isConnected: isWalletConnected } = useTonConnect();
+  const { isConnected: isWalletConnected } = useTonConnect();
 
   useEffect(() => {
     fetchAllData();
@@ -485,9 +485,10 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
         />
 
         <Tabs defaultValue="expenses" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="expenses">Expenses</TabsTrigger>
             <TabsTrigger value="balances">Balances</TabsTrigger>
+            <TabsTrigger value="settle">Settle</TabsTrigger>
             <TabsTrigger value="invite">Invite</TabsTrigger>
           </TabsList>
 
@@ -504,7 +505,19 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
             <SettlementsSection balances={balances} />
           </TabsContent>
 
-          {/* Temporarily disabled TON settlement tab */}
+          <TabsContent value="settle">
+            <div className="space-y-4">
+              <TonWalletConnect onWalletConnected={handleWalletConnected} />
+              
+              {isWalletConnected && (
+                <SettlementManager 
+                  eventId={eventId}
+                  participants={cloudParticipants}
+                  balances={balances}
+                />
+              )}
+            </div>
+          </TabsContent>
 
           <TabsContent value="invite">
             <InviteSection 
