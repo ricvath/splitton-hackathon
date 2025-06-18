@@ -59,16 +59,32 @@ declare global {
   }
 }
 
+// Mock user for local testing
+const MOCK_USER: TelegramUser = {
+  id: 12345678,
+  first_name: "Demo",
+  last_name: "User",
+  username: "demo_user",
+  language_code: "en"
+};
+
+// Bot information
+const BOT_USERNAME = 'splitton_bot';
+const BOT_NAME = 'SplitTON';
+
 export const useTelegram = () => {
   const [user, setUser] = useState<TelegramUser | null>(null);
   const [webApp, setWebApp] = useState<TelegramWebApp | null>(null);
+  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
     if (tg) {
+      // Real Telegram Web App is available
       tg.ready();
       setWebApp(tg);
       setUser(tg.initDataUnsafe.user || null);
+      setIsReady(true);
       
       // Set Telegram theme
       if (tg.themeParams) {
@@ -83,12 +99,24 @@ export const useTelegram = () => {
       
       // Expand the app to full height
       tg.expand();
+      
+      console.log('Telegram WebApp initialized:', { 
+        version: tg.version,
+        platform: tg.platform,
+        colorScheme: tg.colorScheme,
+        viewportHeight: tg.viewportHeight
+      });
+    } else {
+      // No Telegram Web App - we're in browser mode for local testing
+      console.log('Running in browser mode (no Telegram Web App detected)');
+      setUser(MOCK_USER);
+      setIsReady(true);
     }
   }, []);
 
   const shareApp = () => {
-    const shareText = "Split expenses easily with SplitTON! 💰⚡";
-    const shareUrl = window.location.href;
+    const shareText = `Split expenses easily with ${BOT_NAME}! 💰⚡`;
+    const shareUrl = `https://t.me/${BOT_USERNAME}`;
     
     if (webApp) {
       // Use Telegram's native sharing if available
@@ -97,13 +125,14 @@ export const useTelegram = () => {
       // Fallback to web sharing
       if (navigator.share) {
         navigator.share({
-          title: 'SplitTON',
+          title: BOT_NAME,
           text: shareText,
           url: shareUrl,
         });
       } else {
         // Copy to clipboard as fallback
         navigator.clipboard.writeText(`${shareText} ${shareUrl}`);
+        alert('Link copied to clipboard!');
       }
     }
   };
@@ -132,6 +161,7 @@ export const useTelegram = () => {
         webApp.HapticFeedback.impactOccurred(type);
       }
     }
+    // No haptic feedback in browser mode - silent fallback
   };
 
   return {
@@ -143,5 +173,8 @@ export const useTelegram = () => {
     hapticFeedback,
     isInTelegram: !!webApp,
     colorScheme: webApp?.colorScheme || 'light',
+    isReady,
+    botUsername: BOT_USERNAME,
+    botName: BOT_NAME
   };
 }; 

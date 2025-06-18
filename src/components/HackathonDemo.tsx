@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Badge } from '../components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Plus, Users, Receipt, Zap, Trash2 } from 'lucide-react';
-import { useTelegram } from '@/hooks/useTelegram';
-import { useLocalExpenses, SimpleExpense } from '@/hooks/useLocalExpenses';
+import { useTelegram } from '../hooks/useTelegram';
+import { useLocalExpenses, SimpleExpense } from '../hooks/useLocalExpenses';
 import { SettlementSuggestion } from './SettlementSuggestion';
+import { Separator } from '../components/ui/separator';
 
 const DEMO_EXPENSES: Omit<SimpleExpense, 'id' | 'timestamp'>[] = [
   {
@@ -35,7 +36,7 @@ const DEMO_EXPENSES: Omit<SimpleExpense, 'id' | 'timestamp'>[] = [
 ];
 
 export const HackathonDemo = () => {
-  const { user, shareApp, hapticFeedback, isInTelegram } = useTelegram();
+  const { user, shareApp, hapticFeedback, isInTelegram, showMainButton, hideMainButton, botName, isReady } = useTelegram();
   const {
     expenses,
     participants,
@@ -48,14 +49,11 @@ export const HackathonDemo = () => {
     clearAllData
   } = useLocalExpenses();
 
-  const [newExpense, setNewExpense] = useState({
-    description: '',
-    amount: '',
-    paidBy: '',
-    sharedBy: [] as string[]
-  });
-
-  const [newParticipant, setNewParticipant] = useState('');
+  const [newExpenseName, setNewExpenseName] = useState('');
+  const [newExpenseAmount, setNewExpenseAmount] = useState('');
+  const [selectedPayer, setSelectedPayer] = useState<string>('');
+  
+  const [newParticipantName, setNewParticipantName] = useState('');
 
   // Initialize demo data if no expenses exist
   useEffect(() => {
@@ -79,37 +77,42 @@ export const HackathonDemo = () => {
     }
   }, [user, expenses.length, addExpense, addParticipant]);
 
-  const handleAddExpense = () => {
-    if (!newExpense.description || !newExpense.amount || !newExpense.paidBy) {
-      return;
+  // Set up Telegram main button when balances are available
+  useEffect(() => {
+    if (isInTelegram && Object.keys(calculateBalances()).length > 0) {
+      showMainButton('Settle Up', () => {
+        // Scroll to settlement section
+        const settlementSection = document.getElementById('settlement-section');
+        if (settlementSection) {
+          settlementSection.scrollIntoView({ behavior: 'smooth' });
+          hapticFeedback('light');
+        }
+      });
+    } else {
+      hideMainButton();
     }
-
-    const selectedParticipants = newExpense.sharedBy.length > 0 
-      ? newExpense.sharedBy 
-      : participants;
-
-    addExpense({
-      description: newExpense.description,
-      amount: parseFloat(newExpense.amount),
-      paidBy: newExpense.paidBy,
-      sharedBy: selectedParticipants
-    });
-
-    setNewExpense({
-      description: '',
-      amount: '',
-      paidBy: '',
-      sharedBy: []
-    });
-
-    hapticFeedback('success');
-  };
+  }, [isInTelegram, calculateBalances, showMainButton, hideMainButton, hapticFeedback]);
 
   const handleAddParticipant = () => {
-    if (newParticipant.trim() && !participants.includes(newParticipant.trim())) {
-      addParticipant(newParticipant.trim());
-      setNewParticipant('');
-      hapticFeedback('light');
+    if (newParticipantName.trim()) {
+      addParticipant(newParticipantName.trim());
+      setNewParticipantName('');
+      hapticFeedback('selection');
+    }
+  };
+
+  const handleAddExpense = () => {
+    if (newExpenseName.trim() && newExpenseAmount && selectedPayer) {
+      addExpense({
+        id: Date.now().toString(),
+        name: newExpenseName.trim(),
+        amount: parseFloat(newExpenseAmount),
+        paidBy: selectedPayer,
+        date: new Date().toISOString(),
+      });
+      setNewExpenseName('');
+      setNewExpenseAmount('');
+      hapticFeedback('success');
     }
   };
 
@@ -118,292 +121,197 @@ export const HackathonDemo = () => {
     hapticFeedback('medium');
   };
 
-  const toggleParticipantSelection = (participant: string) => {
-    setNewExpense(prev => ({
-      ...prev,
-      sharedBy: prev.sharedBy.includes(participant)
-        ? prev.sharedBy.filter(p => p !== participant)
-        : [...prev.sharedBy, participant]
-    }));
-  };
-
   const balances = calculateBalances();
   const debts = calculateDebts();
   const totalExpenses = getTotalExpenses();
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 p-4">
-      <div className="max-w-md mx-auto space-y-6">
-        {/* Header */}
-        <div className="text-center space-y-2">
-          <div className="flex items-center justify-center gap-2">
-            <div className="p-2 bg-blue-600 rounded-full">
-              <Zap className="h-6 w-6 text-white" />
-            </div>
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-              SplitTON
-            </h1>
-          </div>
-          <p className="text-gray-600 text-sm">
-            Web2 expenses, Web3 settlements
-          </p>
-          {isInTelegram && user && (
-            <Badge variant="secondary" className="text-xs">
-              Welcome, {user.first_name}! 👋
-            </Badge>
-          )}
+  if (!isReady) {
+    return (
+      <div className="container mx-auto px-4 py-8 flex items-center justify-center h-screen">
+        <div className="text-center">
+          <img src="/coin.gif" alt="Loading" className="w-16 h-16 mx-auto mb-4" />
+          <p>Loading {botName}...</p>
         </div>
+      </div>
+    );
+  }
 
-        {/* Quick Stats */}
-        {expenses.length > 0 && (
-          <Card className="bg-white/50 backdrop-blur-sm border-white/20">
-            <CardContent className="p-4">
-              <div className="grid grid-cols-3 gap-4 text-center">
-                <div>
-                  <div className="text-2xl font-bold text-blue-600">
-                    ${totalExpenses.toFixed(2)}
+  return (
+    <div className="container mx-auto px-4 py-8 max-w-md">
+      {/* App header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold">SplitTON</h1>
+          <p className="text-sm opacity-75">Web2 expenses, Web3 settlements</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <img src="/coin.gif" alt="TON Coin" className="w-10 h-10 ton-coin" />
+        </div>
+      </div>
+
+      {/* User info */}
+      <Card className="mb-6">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg">Welcome{user ? `, ${user.first_name}` : ''}!</CardTitle>
+          <CardDescription>
+            {isInTelegram 
+              ? 'You are using the Telegram Mini App version'
+              : 'You are using the browser version (some features may be limited)'}
+          </CardDescription>
+        </CardHeader>
+      </Card>
+
+      {/* Participants */}
+      <Card className="mb-6">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg">Participants</CardTitle>
+          <CardDescription>Add people to split expenses with</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex gap-2 mb-4">
+            <Input 
+              placeholder="Name" 
+              value={newParticipantName}
+              onChange={(e) => setNewParticipantName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleAddParticipant()}
+            />
+            <Button onClick={handleAddParticipant}>Add</Button>
+          </div>
+          
+          {participants.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {participants.map(participant => (
+                <Badge key={participant} variant="secondary">
+                  {participant}
+                </Badge>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No participants added yet</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Add expense */}
+      <Card className="mb-6">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg">Add Expense</CardTitle>
+          <CardDescription>Record who paid for what</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="expense-name">Description</Label>
+              <Input 
+                id="expense-name"
+                placeholder="e.g. Dinner, Taxi, etc." 
+                value={newExpenseName}
+                onChange={(e) => setNewExpenseName(e.target.value)}
+              />
+            </div>
+            
+            <div>
+              <Label htmlFor="expense-amount">Amount</Label>
+              <Input 
+                id="expense-amount"
+                type="number" 
+                placeholder="0.00" 
+                value={newExpenseAmount}
+                onChange={(e) => setNewExpenseAmount(e.target.value)}
+              />
+            </div>
+            
+            <div>
+              <Label htmlFor="payer">Paid by</Label>
+              <select 
+                id="payer"
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                value={selectedPayer}
+                onChange={(e) => setSelectedPayer(e.target.value)}
+                disabled={participants.length === 0}
+              >
+                <option value="">Select who paid</option>
+                {participants.map(participant => (
+                  <option key={participant} value={participant}>{participant}</option>
+                ))}
+              </select>
+            </div>
+            
+            <Button 
+              onClick={handleAddExpense} 
+              className="w-full"
+              disabled={!newExpenseName.trim() || !newExpenseAmount || !selectedPayer}
+            >
+              Add Expense
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Expenses list */}
+      {expenses.length > 0 && (
+        <Card className="mb-6">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Expenses</CardTitle>
+            <CardDescription>Total: {totalExpenses.toFixed(2)}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {expenses.map(expense => (
+                <div key={expense.id} className="flex justify-between items-center">
+                  <div>
+                    <p className="font-medium">{expense.name}</p>
+                    <p className="text-sm text-muted-foreground">Paid by {expense.paidBy}</p>
                   </div>
-                  <div className="text-xs text-gray-600">Total</div>
+                  <p className="font-medium">{expense.amount.toFixed(2)}</p>
                 </div>
-                <div>
-                  <div className="text-2xl font-bold text-purple-600">
-                    {expenses.length}
-                  </div>
-                  <div className="text-xs text-gray-600">Expenses</div>
-                </div>
-                <div>
-                  <div className="text-2xl font-bold text-green-600">
-                    {participants.length}
-                  </div>
-                  <div className="text-xs text-gray-600">People</div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
-        {/* Main Content */}
-        <Tabs defaultValue="expenses" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="expenses" className="text-xs">
-              <Receipt className="h-4 w-4 mr-1" />
-              Expenses
-            </TabsTrigger>
-            <TabsTrigger value="balances" className="text-xs">
-              <Users className="h-4 w-4 mr-1" />
-              Balances
-            </TabsTrigger>
-            <TabsTrigger value="settle" className="text-xs">
-              <Zap className="h-4 w-4 mr-1" />
-              Settle
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="expenses" className="space-y-4">
-            {/* Add Expense */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Add Expense</CardTitle>
-                <CardDescription>Track what you and your friends spent</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="description">Description</Label>
-                  <Input
-                    id="description"
-                    placeholder="e.g., Dinner at restaurant"
-                    value={newExpense.description}
-                    onChange={(e) => setNewExpense(prev => ({ ...prev, description: e.target.value }))}
-                  />
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="amount">Amount ($)</Label>
-                    <Input
-                      id="amount"
-                      type="number"
-                      step="0.01"
-                      placeholder="0.00"
-                      value={newExpense.amount}
-                      onChange={(e) => setNewExpense(prev => ({ ...prev, amount: e.target.value }))}
-                    />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="paidBy">Paid by</Label>
-                    <select
-                      id="paidBy"
-                      className="w-full p-2 border rounded-md text-sm"
-                      value={newExpense.paidBy}
-                      onChange={(e) => setNewExpense(prev => ({ ...prev, paidBy: e.target.value }))}
-                    >
-                      <option value="">Select person</option>
-                      {participants.map(participant => (
-                        <option key={participant} value={participant}>{participant}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                {participants.length > 0 && (
-                  <div className="space-y-2">
-                    <Label>Split between</Label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {participants.map(participant => (
-                        <button
-                          key={participant}
-                          type="button"
-                          onClick={() => toggleParticipantSelection(participant)}
-                          className={`p-2 text-xs rounded-md border transition-colors ${
-                            newExpense.sharedBy.includes(participant) || newExpense.sharedBy.length === 0
-                              ? 'bg-blue-50 border-blue-200 text-blue-800'
-                              : 'bg-gray-50 border-gray-200 text-gray-600'
-                          }`}
-                        >
-                          {participant}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="text-xs text-gray-500">
-                      {newExpense.sharedBy.length === 0 ? 'All participants selected' : `${newExpense.sharedBy.length} selected`}
-                    </p>
-                  </div>
-                )}
-
-                <Button onClick={handleAddExpense} className="w-full">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Expense
-                </Button>
-              </CardContent>
-            </Card>
-
-            {/* Expense List */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Recent Expenses</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {expenses.length === 0 ? (
-                  <p className="text-center text-gray-500 py-8">
-                    No expenses yet. Add one above! 👆
+      {/* Balances */}
+      {Object.keys(balances).length > 0 && (
+        <Card className="mb-6">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Balances</CardTitle>
+            <CardDescription>Who owes what to whom</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {Object.entries(balances).map(([person, balance]) => (
+                <div key={person} className="flex justify-between items-center">
+                  <p>{person}</p>
+                  <p className={`font-medium ${balance > 0 ? 'text-green-600' : balance < 0 ? 'text-red-600' : ''}`}>
+                    {balance > 0 ? '+' : ''}{balance.toFixed(2)}
                   </p>
-                ) : (
-                  <div className="space-y-3">
-                    {expenses.slice().reverse().map((expense) => (
-                      <div key={expense.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                        <div className="flex-1">
-                          <div className="font-medium text-sm">{expense.description}</div>
-                          <div className="text-xs text-gray-600">
-                            Paid by <span className="font-medium">{expense.paidBy}</span> • 
-                            Split {expense.sharedBy.length} ways
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="text-right">
-                            <div className="font-bold">${expense.amount.toFixed(2)}</div>
-                            <div className="text-xs text-gray-500">
-                              ${(expense.amount / expense.sharedBy.length).toFixed(2)} each
-                            </div>
-                          </div>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleDeleteExpense(expense.id)}
-                            className="h-8 w-8 p-0 text-red-500 hover:text-red-700"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Add Participant */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Add People</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Enter name"
-                    value={newParticipant}
-                    onChange={(e) => setNewParticipant(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleAddParticipant()}
-                  />
-                  <Button onClick={handleAddParticipant}>
-                    <Plus className="h-4 w-4" />
-                  </Button>
                 </div>
-                
-                <div className="flex flex-wrap gap-2">
-                  {participants.map(participant => (
-                    <Badge key={participant} variant="secondary">
-                      {participant}
-                    </Badge>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
-          <TabsContent value="balances" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Current Balances</CardTitle>
-                <CardDescription>Who owes what to whom</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {Object.keys(balances).length === 0 ? (
-                  <p className="text-center text-gray-500 py-8">
-                    No balances to show yet
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {Object.entries(balances).map(([participant, balance]) => (
-                      <div key={participant} className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
-                        <div className="font-medium">{participant}</div>
-                        <div className={`font-bold ${
-                          balance > 0 ? 'text-green-600' : balance < 0 ? 'text-red-600' : 'text-gray-600'
-                        }`}>
-                          {balance > 0 ? '+' : ''}${balance.toFixed(2)}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="settle">
+      {/* Settlement suggestions */}
+      {expenses.length > 0 && Object.keys(balances).length > 0 && (
+        <>
+          <Separator className="my-6" />
+          <div id="settlement-section">
             <SettlementSuggestion 
               debts={debts}
               totalExpenses={totalExpenses}
               participantCount={participants.length}
             />
-          </TabsContent>
-        </Tabs>
+          </div>
+        </>
+      )}
 
-        {/* Debug/Reset */}
-        {expenses.length > 0 && (
-          <Card className="border-red-200 bg-red-50">
-            <CardContent className="p-4 text-center">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={clearAllData}
-                className="text-red-600 border-red-200 hover:bg-red-100"
-              >
-                Reset Demo Data
-              </Button>
-            </CardContent>
-          </Card>
-        )}
+      {/* Debug info */}
+      <div className="mt-8 text-xs text-muted-foreground">
+        <p>Running in: {isInTelegram ? 'Telegram Mini App' : 'Browser'}</p>
+        <p>User: {user ? `${user.first_name} ${user.last_name || ''}` : 'Not logged in'}</p>
+        <p className="mt-2">SplitTON Hackathon Demo</p>
       </div>
     </div>
   );

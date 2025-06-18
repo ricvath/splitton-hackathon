@@ -1,7 +1,7 @@
 {
-  "url": "https://splitton-hackathon.netlify.app",
+  "url": "http://localhost:8080",
   "name": "SplitTON",
-  "iconUrl": "https://splitton-hackathon.netlify.app/favicon.ico",
-  "termsOfUseUrl": "https://splitton-hackathon.netlify.app",
-  "privacyPolicyUrl": "https://splitton-hackathon.netlify.app"
+  "iconUrl": "/coin.gif",
+  "termsOfUseUrl": "http://localhost:8080/terms",
+  "privacyPolicyUrl": "http://localhost:8080/privacy"
 } 
