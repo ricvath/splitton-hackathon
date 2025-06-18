@@ -272,7 +272,9 @@ export const SettlementManager: React.FC<SettlementManagerProps> = ({
                               )}
                             </>
                           ) : (
-                            <XCircle className="h-4 w-4 text-red-500" title={result.error} />
+                            <div title={result.error}>
+                              <XCircle className="h-4 w-4 text-red-500" />
+                            </div>
                           )}
                         </div>
                       )}
