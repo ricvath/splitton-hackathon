@@ -5,6 +5,7 @@ import { cloudStorage } from '@/storage/cloudStorage';
 import { localDB } from '@/storage/indexedDB';
 import { CloudEvent, CloudExpense, CloudParticipant } from '@/storage/types';
 import { useTelegramData } from '@/hooks/useTelegramData';
+import { useTonConnect } from '@/hooks/useTonConnect';
 import CoverPhoto from './CoverPhoto';
 import Weather from './Weather';
 import ParticipantChips from './ParticipantChips';
@@ -13,6 +14,8 @@ import ExpenseForm from './ExpenseForm';
 import ExpensesList from './ExpensesList';
 import SettlementsSection from './SettlementsSection';
 import InviteSection from './InviteSection';
+import { TonWalletConnect } from './TonWalletConnect';
+import { SettlementManager } from './SettlementManager';
 
 interface Expense {
   id: string;
@@ -41,6 +44,7 @@ interface EventManagerProps {
 const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant }) => {
   const [eventData, setEventData] = useState<EventData | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
+  const [cloudParticipants, setCloudParticipants] = useState<CloudParticipant[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -52,6 +56,7 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
     sharedBy: [] as string[]
   });
   const { user, shareEvent } = useTelegramData();
+  const { isConnected: isWalletConnected } = useTonConnect();
 
   useEffect(() => {
     fetchAllData();
@@ -108,14 +113,15 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
       }
 
       if (event) {
-        const activeParticipants = event.participants
-          .filter(p => p.isActive)
+        const activeCloudParticipants = event.participants.filter(p => p.isActive);
+        const activeParticipants = activeCloudParticipants
           .map(p => ({
             id: p.telegramId,
             name: p.firstName + (p.lastName ? ` ${p.lastName}` : ''),
           }))
           .sort((a, b) => a.name.localeCompare(b.name));
         
+        setCloudParticipants(activeCloudParticipants);
         setParticipants(activeParticipants);
       }
     } catch (error) {
@@ -382,6 +388,54 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
     }
   };
 
+  const handleWalletConnected = async (walletAddress: string) => {
+    if (!user) return;
+    
+    try {
+      // Update the current user's participant record with wallet address
+      let event: CloudEvent | null = null;
+      
+      try {
+        event = await cloudStorage.getEvent(eventId);
+      } catch (error) {
+        event = await localDB.getEvent(eventId);
+      }
+
+      if (!event) return;
+
+      // Find and update the current user's participant record
+      const updatedParticipants = event.participants.map(participant => {
+        if (participant.telegramId === user.id.toString()) {
+          return {
+            ...participant,
+            walletAddress,
+            lastModified: Date.now(),
+          };
+        }
+        return participant;
+      });
+
+      const updatedEvent: CloudEvent = {
+        ...event,
+        participants: updatedParticipants,
+        lastModified: Date.now(),
+      };
+
+      // Save updated event
+      try {
+        await cloudStorage.saveEvent(updatedEvent);
+      } catch (error) {
+        console.warn('Cloud storage failed, saving to IndexedDB:', error);
+      }
+      await localDB.saveEvent(updatedEvent);
+
+      // Refresh participants data
+      await fetchParticipants();
+    } catch (error) {
+      console.error('Error updating wallet address:', error);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -431,9 +485,10 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
         />
 
         <Tabs defaultValue="expenses" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="expenses">Expenses</TabsTrigger>
             <TabsTrigger value="balances">Balances</TabsTrigger>
+            <TabsTrigger value="settle">Settle</TabsTrigger>
             <TabsTrigger value="invite">Invite</TabsTrigger>
           </TabsList>
 
@@ -448,6 +503,24 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
 
           <TabsContent value="balances">
             <SettlementsSection balances={balances} />
+          </TabsContent>
+
+          <TabsContent value="settle" className="space-y-4">
+            <TonWalletConnect 
+              onWalletConnected={handleWalletConnected}
+              showBalance={true}
+              compact={false}
+            />
+            
+            <SettlementManager
+              balances={balances}
+              participants={cloudParticipants}
+              currency="USD"
+              onSettlementComplete={(results) => {
+                console.log('Settlement completed:', results);
+                // You could show a success message or refresh data here
+              }}
+            />
           </TabsContent>
 
           <TabsContent value="invite">

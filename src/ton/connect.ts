@@ -1,26 +1,25 @@
 import { TonConnect, Wallet } from '@tonconnect/sdk';
-
-export interface TonWallet {
-  address: string;
-  publicKey: string;
-  walletStateInit: string;
-}
+import { Address, toNano } from '@ton/core';
 
 export interface Settlement {
+  from: string;
   to: string;
-  amount: string; // in nanotons
-  comment?: string;
+  amountFiat: number;
+  amountTon: number;
+  currency: string;
+  description?: string;
+}
+
+export interface WalletInfo {
+  address: string;
+  balance: string;
+  isConnected: boolean;
 }
 
 export class TonConnectManager {
-  private connector: TonConnect;
   private static instance: TonConnectManager;
-
-  private constructor() {
-    this.connector = new TonConnect({
-      manifestUrl: `${window.location.origin}/tonconnect-manifest.json`
-    });
-  }
+  private connector: TonConnect;
+  private isInitialized = false;
 
   static getInstance(): TonConnectManager {
     if (!TonConnectManager.instance) {
@@ -29,22 +28,53 @@ export class TonConnectManager {
     return TonConnectManager.instance;
   }
 
-  async getWallets(): Promise<Wallet[]> {
-    return this.connector.getWallets();
+  constructor() {
+    this.connector = new TonConnect({
+      manifestUrl: `${window.location.origin}/tonconnect-manifest.json`
+    });
   }
 
-  async connectWallet(wallet?: Wallet): Promise<TonWallet | null> {
+  async init(): Promise<void> {
+    if (this.isInitialized) return;
+
     try {
-      const walletConnection = await this.connector.connect(wallet);
-      
-      if (walletConnection) {
-        return {
-          address: walletConnection.account.address,
-          publicKey: walletConnection.account.publicKey,
-          walletStateInit: walletConnection.account.walletStateInit,
-        };
+      // Restore connection if exists
+      await this.connector.restoreConnection();
+      this.isInitialized = true;
+      console.log('TON Connect initialized successfully');
+    } catch (error) {
+      console.error('Failed to initialize TON Connect:', error);
+      throw error;
+    }
+  }
+
+  async getWallets(): Promise<Wallet[]> {
+    try {
+      return await this.connector.getWallets();
+    } catch (error) {
+      console.error('Failed to get wallets:', error);
+      return [];
+    }
+  }
+
+  async connectWallet(wallet?: Wallet): Promise<WalletInfo | null> {
+    try {
+      await this.init();
+
+      if (wallet) {
+        await this.connector.connect(wallet);
+      } else {
+        // Connect to first available wallet
+        const wallets = await this.getWallets();
+        if (wallets.length === 0) {
+          throw new Error('No wallets available');
+        }
+        await this.connector.connect(wallets[0]);
       }
-      return null;
+
+      const walletInfo = this.getWalletInfo();
+      console.log('Wallet connected:', walletInfo);
+      return walletInfo;
     } catch (error) {
       console.error('Failed to connect wallet:', error);
       return null;
@@ -54,85 +84,127 @@ export class TonConnectManager {
   async disconnectWallet(): Promise<void> {
     try {
       await this.connector.disconnect();
+      console.log('Wallet disconnected');
     } catch (error) {
       console.error('Failed to disconnect wallet:', error);
+      throw error;
     }
   }
 
-  isConnected(): boolean {
-    return this.connector.connected;
-  }
-
-  getConnectedWallet(): TonWallet | null {
-    if (!this.connector.connected || !this.connector.account) {
-      return null;
-    }
+  getWalletInfo(): WalletInfo | null {
+    const wallet = this.connector.wallet;
+    if (!wallet) return null;
 
     return {
-      address: this.connector.account.address,
-      publicKey: this.connector.account.publicKey,
-      walletStateInit: this.connector.account.walletStateInit,
+      address: wallet.account.address,
+      balance: '0', // Will be fetched separately
+      isConnected: true,
     };
   }
 
-  async sendSettlement(settlement: Settlement): Promise<string | null> {
-    if (!this.isConnected()) {
-      throw new Error('Wallet not connected');
-    }
+  isWalletConnected(): boolean {
+    return this.connector.connected;
+  }
 
+  async getWalletBalance(address?: string): Promise<string> {
     try {
+      const walletAddress = address || this.connector.wallet?.account.address;
+      if (!walletAddress) return '0';
+
+      // In a real implementation, you would fetch from TON API
+      // For now, return a placeholder
+      return '0';
+    } catch (error) {
+      console.error('Failed to get wallet balance:', error);
+      return '0';
+    }
+  }
+
+  async sendSettlement(settlement: Settlement): Promise<string | null> {
+    try {
+      if (!this.isWalletConnected()) {
+        throw new Error('Wallet not connected');
+      }
+
       const transaction = {
-        validUntil: Math.floor(Date.now() / 1000) + 300, // 5 minutes
+        validUntil: Math.floor(Date.now() / 1000) + 600, // 10 minutes
         messages: [
           {
             address: settlement.to,
-            amount: settlement.amount,
-            payload: settlement.comment ? this.createCommentPayload(settlement.comment) : undefined,
+            amount: toNano(settlement.amountTon).toString(),
+            payload: settlement.description || `Settlement: ${settlement.amountFiat} ${settlement.currency}`,
           },
         ],
       };
 
       const result = await this.connector.sendTransaction(transaction);
-      return result.boc; // Return the transaction BOC
+      console.log('Settlement transaction sent:', result);
+      return result.boc; // Return transaction hash
     } catch (error) {
       console.error('Failed to send settlement:', error);
       return null;
     }
   }
 
-  private createCommentPayload(comment: string): string {
-    // Create a simple comment payload
-    // In a real implementation, you might want to use TonWeb or similar library
-    const commentBytes = new TextEncoder().encode(comment);
-    return Buffer.from(commentBytes).toString('base64');
+  async sendMultipleSettlements(settlements: Settlement[]): Promise<(string | null)[]> {
+    const results: (string | null)[] = [];
+
+    for (const settlement of settlements) {
+      try {
+        const result = await this.sendSettlement(settlement);
+        results.push(result);
+        
+        // Add delay between transactions to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } catch (error) {
+        console.error('Failed to send settlement:', settlement, error);
+        results.push(null);
+      }
+    }
+
+    return results;
   }
 
-  // Convert TON amount to nanotons (1 TON = 1,000,000,000 nanotons)
-  static tonToNanoton(ton: number): string {
-    return (ton * 1_000_000_000).toString();
-  }
-
-  // Convert nanotons to TON
-  static nanotonToTon(nanoton: string): number {
-    return parseInt(nanoton) / 1_000_000_000;
-  }
-
-  // Subscribe to wallet connection changes
-  onWalletChange(callback: (wallet: TonWallet | null) => void): () => void {
-    const unsubscribe = this.connector.onStatusChange((wallet) => {
+  // Event listeners for wallet state changes
+  onWalletChange(callback: (wallet: WalletInfo | null) => void): void {
+    this.connector.onStatusChange((wallet) => {
       if (wallet) {
         callback({
           address: wallet.account.address,
-          publicKey: wallet.account.publicKey,
-          walletStateInit: wallet.account.walletStateInit,
+          balance: '0',
+          isConnected: true,
         });
       } else {
         callback(null);
       }
     });
+  }
 
-    return unsubscribe;
+  // Utility function to validate TON address
+  isValidTonAddress(address: string): boolean {
+    try {
+      Address.parse(address);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // Format TON address for display
+  formatAddress(address: string): string {
+    if (!address) return '';
+    return `${address.slice(0, 6)}...${address.slice(-6)}`;
+  }
+
+  // Convert TON to nanoTON
+  toNano(amount: number): bigint {
+    return toNano(amount);
+  }
+
+  // Convert nanoTON to TON
+  fromNano(amount: string | bigint): string {
+    return (Number(amount) / 1e9).toFixed(9);
   }
 }
 
-export const tonConnect = TonConnectManager.getInstance(); 
+export const tonConnectManager = TonConnectManager.getInstance(); 

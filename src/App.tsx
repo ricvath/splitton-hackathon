@@ -17,17 +17,26 @@ const AppContent = () => {
   const { isReady, user } = useTelegramData();
 
   useEffect(() => {
-    // Initialize IndexedDB for offline storage
-    const initStorage = async () => {
+    // Initialize storage and TON Connect
+    const initApp = async () => {
       try {
+        // Initialize IndexedDB for offline storage
         await localDB.init();
         console.log('IndexedDB initialized successfully');
+        
+        // Initialize TON Connect (don't wait for it to avoid blocking)
+        import('./ton/connect').then(({ tonConnectManager }) => {
+          tonConnectManager.init().catch(error => {
+            console.warn('TON Connect initialization failed:', error);
+          });
+        });
+        
       } catch (error) {
-        console.warn('Failed to initialize IndexedDB:', error);
+        console.warn('Failed to initialize app:', error);
       }
     };
 
-    initStorage();
+    initApp();
   }, []);
 
   // Show loading while Telegram WebApp is initializing
