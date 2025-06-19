@@ -29,8 +29,15 @@ export class TonConnectManager {
   }
 
   constructor() {
+    // Use a more reliable manifest URL
+    const manifestUrl = process.env.NODE_ENV === 'production' 
+      ? 'https://splitton-hackathon.vercel.app/tonconnect-manifest.json'
+      : `${window.location.origin}/tonconnect-manifest.json`;
+      
+    console.log('TON Connect manifest URL:', manifestUrl);
+    
     this.connector = new TonConnect({
-      manifestUrl: `${window.location.origin}/tonconnect-manifest.json`
+      manifestUrl
     });
   }
 
@@ -59,25 +66,47 @@ export class TonConnectManager {
 
   async connectWallet(wallet?: Wallet): Promise<WalletInfo | null> {
     try {
+      console.log('Starting wallet connection...');
       await this.init();
 
-      if (wallet) {
-        await this.connector.connect(wallet);
-      } else {
-        // Connect to first available wallet
+      let targetWallet = wallet;
+      
+      if (!targetWallet) {
+        console.log('Getting available wallets...');
         const wallets = await this.getWallets();
+        console.log('Available wallets:', wallets.length);
+        
         if (wallets.length === 0) {
-          throw new Error('No wallets available');
+          throw new Error('No TON wallets found. Please install a TON wallet like Tonkeeper, OpenMask, or TON Wallet.');
         }
-        await this.connector.connect(wallets[0]);
+        
+        // Prefer Tonkeeper if available, otherwise use first wallet
+        targetWallet = wallets.find(w => w.name.toLowerCase().includes('tonkeeper')) || wallets[0];
+        console.log('Selected wallet:', targetWallet.name);
       }
 
+      console.log('Connecting to wallet:', targetWallet.name);
+      await this.connector.connect(targetWallet);
+
       const walletInfo = this.getWalletInfo();
-      console.log('Wallet connected:', walletInfo);
+      console.log('Wallet connected successfully:', walletInfo);
       return walletInfo;
     } catch (error) {
       console.error('Failed to connect wallet:', error);
-      return null;
+      
+      // Provide more specific error messages
+      if (error instanceof Error) {
+        if (error.message.includes('rejected')) {
+          throw new Error('Wallet connection was rejected by user');
+        } else if (error.message.includes('not found')) {
+          throw new Error('No TON wallet found. Please install Tonkeeper or another TON wallet.');
+        } else if (error.message.includes('timeout')) {
+          throw new Error('Connection timeout. Please try again.');
+        }
+        throw error;
+      }
+      
+      throw new Error('Failed to connect wallet. Please try again.');
     }
   }
 
@@ -207,4 +236,15 @@ export class TonConnectManager {
   }
 }
 
-export const tonConnectManager = TonConnectManager.getInstance(); 
+// Export singleton instance with initialization
+let tonConnectManagerInstance: TonConnectManager | null = null;
+
+export const getTonConnectManager = (): TonConnectManager => {
+  if (!tonConnectManagerInstance) {
+    tonConnectManagerInstance = TonConnectManager.getInstance();
+  }
+  return tonConnectManagerInstance;
+};
+
+// Legacy export for backwards compatibility
+export const tonConnectManager = getTonConnectManager(); 

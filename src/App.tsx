@@ -11,6 +11,7 @@ import Navbar from "./components/ui/Navbar";
 import Footer from "./components/ui/Footer";
 import { localDB } from "./storage/indexedDB";
 import { useTelegramData } from "./hooks/useTelegramData";
+import { getDataSyncManager } from "./storage/dataSync";
 
 const queryClient = new QueryClient();
 
@@ -28,6 +29,10 @@ const AppContent = () => {
         // Initialize IndexedDB for offline storage
         await localDB.init();
         console.log('IndexedDB initialized successfully');
+        
+        // Initialize Data Sync Manager
+        const syncManager = getDataSyncManager();
+        console.log('Data Sync Manager initialized');
         
         // Initialize TON Connect (temporarily disabled for debugging)
         // try {

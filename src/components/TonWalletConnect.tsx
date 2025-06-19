@@ -86,7 +86,7 @@ export const TonWalletConnect: React.FC<TonWalletConnectProps> = ({
   };
 
   // Show error state if TON Connect is not available
-  if (error?.includes('TON Connect not available')) {
+  if (error?.includes('module error') || error?.includes('not available')) {
     return (
       <Card className="w-full max-w-md">
         <CardHeader>
@@ -95,18 +95,35 @@ export const TonWalletConnect: React.FC<TonWalletConnectProps> = ({
             TON Wallet (Unavailable)
           </CardTitle>
           <CardDescription>
-            TON Connect is currently unavailable. This may be due to network issues or browser compatibility.
+            TON Connect is currently unavailable. This may be due to network issues or missing wallet extensions.
           </CardDescription>
         </CardHeader>
         
-        <CardContent>
+        <CardContent className="space-y-3">
           <Alert>
             <AlertTriangle className="h-4 w-4" />
             <AlertDescription>
-              TON wallet functionality is temporarily unavailable. You can still use the app for expense tracking, 
-              but cryptocurrency settlements won't be available.
+              {error}
             </AlertDescription>
           </Alert>
+          
+          <div className="text-sm text-muted-foreground">
+            <p className="font-medium mb-2">To use TON wallet features:</p>
+            <ul className="list-disc list-inside space-y-1">
+              <li>Install a TON wallet like Tonkeeper</li>
+              <li>Make sure you're using a supported browser</li>
+              <li>Check your internet connection</li>
+            </ul>
+          </div>
+          
+          <Button 
+            onClick={() => window.location.reload()} 
+            variant="outline" 
+            className="w-full"
+          >
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Retry Connection
+          </Button>
         </CardContent>
       </Card>
     );

@@ -308,6 +308,58 @@ export class IndexedDBManager {
   }
 
   // Clear all data
+  async getAllEvents(): Promise<CloudEvent[]> {
+    const db = await this.ensureDB();
+    const transaction = db.transaction([STORES.EVENTS], 'readonly');
+    const store = transaction.objectStore(STORES.EVENTS);
+    
+    return new Promise((resolve, reject) => {
+      const request = store.getAll();
+      
+      request.onsuccess = () => {
+        resolve(request.result || []);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async setItem(key: string, value: string): Promise<void> {
+    const db = await this.ensureDB();
+    const transaction = db.transaction([STORES.PREFERENCES], 'readwrite');
+    const store = transaction.objectStore(STORES.PREFERENCES);
+    
+    return new Promise((resolve, reject) => {
+      const request = store.put({
+        userId: `_system_${key}`, // Use a system prefix for non-user data
+        preferences: { [key]: value },
+        lastUpdated: Date.now(),
+      });
+      
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getItem(key: string): Promise<string | null> {
+    const db = await this.ensureDB();
+    const transaction = db.transaction([STORES.PREFERENCES], 'readonly');
+    const store = transaction.objectStore(STORES.PREFERENCES);
+    
+    return new Promise((resolve, reject) => {
+      const request = store.get(`_system_${key}`);
+      
+      request.onsuccess = () => {
+        const result = request.result;
+        if (result && result.preferences && result.preferences[key]) {
+          resolve(result.preferences[key]);
+        } else {
+          resolve(null);
+        }
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
   async clearAllData(): Promise<void> {
     const db = await this.ensureDB();
     const storeNames = Object.values(STORES);

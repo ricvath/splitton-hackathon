@@ -45,12 +45,13 @@ export const useTonConnect = (): UseTonConnectReturn => {
     
     try {
       console.log('Loading TON Connect module...');
-      const { tonConnectManager: manager } = await import('../ton/connect');
+      const { getTonConnectManager } = await import('../ton/connect');
+      const manager = getTonConnectManager();
       setTonConnectManager(manager);
       return manager;
     } catch (err) {
       console.error('Failed to load TON Connect module:', err);
-      setError('TON Connect not available');
+      setError(`TON Connect module error: ${err instanceof Error ? err.message : 'Unknown error'}`);
       return null;
     }
   }, [tonConnectManager]);
@@ -116,26 +117,29 @@ export const useTonConnect = (): UseTonConnectReturn => {
     setError(null);
 
     try {
+      console.log('useTonConnect: Starting wallet connection...');
       const manager = await loadTonConnect();
       if (!manager) {
-        setError('TON Connect not available');
+        setError('TON Connect module failed to load. Please refresh and try again.');
         return false;
       }
 
+      console.log('useTonConnect: Manager loaded, connecting wallet...');
       const walletInfo = await manager.connectWallet();
       
       if (walletInfo) {
+        console.log('useTonConnect: Wallet connected successfully');
         setWallet(walletInfo);
         await refreshBalanceInternal(manager, walletInfo);
         return true;
       } else {
-        setError('Failed to connect wallet');
+        setError('Wallet connection returned no information');
         return false;
       }
     } catch (err) {
+      console.error('useTonConnect: Wallet connection failed:', err);
       const errorMessage = err instanceof Error ? err.message : 'Failed to connect wallet';
       setError(errorMessage);
-      console.error('Wallet connection failed:', err);
       return false;
     } finally {
       setIsConnecting(false);
