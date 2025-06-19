@@ -16,6 +16,7 @@ import SettlementsSection from './SettlementsSection';
 import InviteSection from './InviteSection';
 import { TonWalletConnect } from './TonWalletConnect';
 import { SettlementManager } from './SettlementManager';
+import { CurrencyConverter } from './CurrencyConverter';
 
 interface Expense {
   id: string;
@@ -494,10 +495,11 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
         />
 
         <Tabs defaultValue="expenses" className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="expenses">Expenses</TabsTrigger>
             <TabsTrigger value="balances">Balances</TabsTrigger>
             <TabsTrigger value="settle">Settle</TabsTrigger>
+            <TabsTrigger value="tools">Tools</TabsTrigger>
             <TabsTrigger value="invite">Invite</TabsTrigger>
           </TabsList>
 
@@ -525,6 +527,10 @@ const EventManager: React.FC<EventManagerProps> = ({ eventId, currentParticipant
                 />
               )}
             </div>
+          </TabsContent>
+
+          <TabsContent value="tools">
+            <CurrencyConverter />
           </TabsContent>
 
           <TabsContent value="invite">

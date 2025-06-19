@@ -1,7 +1,11 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { Buffer } from 'buffer';
 import App from "./App.tsx";
 import "./index.css";
+
+// Polyfill Buffer for TON libraries
+window.Buffer = Buffer;
 
 // Suppress browser extension errors
 window.addEventListener('error', (event) => {

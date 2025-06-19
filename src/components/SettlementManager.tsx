@@ -14,7 +14,7 @@ import {
   Wallet,
   ExternalLink 
 } from 'lucide-react';
-import { settlementManager, SettlementPlan, SettlementResult } from '../utils/settlementManager';
+import { settlementManager, SettlementPlan, SettlementResult, SettlementProgress } from '../utils/settlementManager';
 import { currencyManager } from '../utils/currencyManager';
 import { useTonConnect } from '../hooks/useTonConnect';
 import { CloudParticipant } from '../storage/types';
@@ -36,10 +36,12 @@ export const SettlementManager: React.FC<SettlementManagerProps> = ({
   const { isConnected, wallet } = useTonConnect();
   const [settlementPlan, setSettlementPlan] = useState<SettlementPlan | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
-  const [executionProgress, setExecutionProgress] = useState(0);
+  const [executionProgress, setExecutionProgress] = useState<SettlementProgress | null>(null);
   const [executionResults, setExecutionResults] = useState<SettlementResult[]>([]);
   const [estimatedFees, setEstimatedFees] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({});
 
   // Generate settlement plan when data changes
   useEffect(() => {
@@ -53,11 +55,23 @@ export const SettlementManager: React.FC<SettlementManagerProps> = ({
         );
         setSettlementPlan(plan);
 
-        // Estimate transaction fees
+        // Estimate transaction fees and load current exchange rates
         if (plan.settlements.length > 0) {
           const fees = await settlementManager.estimateTransactionFees(plan);
           setEstimatedFees(fees);
         }
+
+        // Load current exchange rates for display
+        const rates: Record<string, number> = {};
+        const currencies = ['USD', 'EUR', 'GBP', 'RUB'];
+        for (const curr of currencies) {
+          try {
+            rates[curr] = await currencyManager.getExchangeRate(curr);
+          } catch (error) {
+            console.warn(`Failed to get rate for ${curr}:`, error);
+          }
+        }
+        setExchangeRates(rates);
       } catch (error) {
         console.error('Failed to generate settlement plan:', error);
         toast.error('Failed to generate settlement plan');
@@ -75,14 +89,14 @@ export const SettlementManager: React.FC<SettlementManagerProps> = ({
     if (!settlementPlan || !isConnected) return;
 
     setIsExecuting(true);
-    setExecutionProgress(0);
+    setExecutionProgress(null);
     setExecutionResults([]);
 
     try {
       const results = await settlementManager.executeSettlementPlan(
         settlementPlan,
-        (completed, total) => {
-          setExecutionProgress((completed / total) * 100);
+        (progress: SettlementProgress) => {
+          setExecutionProgress(progress);
         }
       );
 
@@ -288,21 +302,163 @@ export const SettlementManager: React.FC<SettlementManagerProps> = ({
       )}
 
       {/* Execution Progress */}
-      {isExecuting && (
+      {isExecuting && executionProgress && (
         <Card>
           <CardContent className="p-6">
-            <div className="space-y-2">
+            <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">Executing Settlements</span>
-                <span className="text-sm text-muted-foreground">
-                  {Math.round(executionProgress)}%
-                </span>
+                <Badge variant={
+                  executionProgress.status === 'completed' ? 'default' :
+                  executionProgress.status === 'failed' ? 'destructive' :
+                  'secondary'
+                }>
+                  {executionProgress.status}
+                </Badge>
               </div>
-              <Progress value={executionProgress} className="w-full" />
+              
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span>Progress</span>
+                  <span>{executionProgress.completed} / {executionProgress.total}</span>
+                </div>
+                <Progress 
+                  value={(executionProgress.completed / executionProgress.total) * 100} 
+                  className="w-full" 
+                />
+              </div>
+
+              {executionProgress.currentSettlement && (
+                <div className="p-3 bg-muted rounded-md">
+                  <div className="text-sm font-medium mb-1">Current Transaction:</div>
+                  <div className="text-xs text-muted-foreground">
+                    {currencyManager.formatAmount(
+                      executionProgress.currentSettlement.amountFiat, 
+                      executionProgress.currentSettlement.currency
+                    )} ({executionProgress.currentSettlement.amountTon.toFixed(4)} TON)
+                  </div>
+                </div>
+              )}
+
+              {executionProgress.results.length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Transaction Results:</div>
+                  <div className="max-h-32 overflow-y-auto space-y-1">
+                    {executionProgress.results.map((result, index) => (
+                      <div key={index} className="flex items-center justify-between text-xs p-2 bg-muted rounded">
+                        <span>Transaction #{index + 1}</span>
+                        <div className="flex items-center gap-1">
+                          {result.success ? (
+                            <>
+                              <CheckCircle className="h-3 w-3 text-green-500" />
+                              <span className="text-green-600">Success</span>
+                            </>
+                          ) : (
+                            <>
+                              <XCircle className="h-3 w-3 text-red-500" />
+                              <span className="text-red-600">Failed</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
       )}
+
+      {/* Advanced Settings */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base">Advanced Settings</CardTitle>
+              <CardDescription>Currency conversion and settlement options</CardDescription>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+            >
+              {showAdvanced ? 'Hide' : 'Show'}
+            </Button>
+          </div>
+        </CardHeader>
+        
+        {showAdvanced && (
+          <CardContent className="space-y-4">
+            <Separator />
+            
+            {/* Currency Rates */}
+            <div>
+              <h4 className="font-medium mb-2">Current Exchange Rates</h4>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="flex justify-between">
+                  <span>1 USD =</span>
+                  <span>{(1 / (exchangeRates.USD || 1)).toFixed(6)} TON</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>1 EUR =</span>
+                  <span>{(1 / (exchangeRates.EUR || 1)).toFixed(6)} TON</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>1 GBP =</span>
+                  <span>{(1 / (exchangeRates.GBP || 1)).toFixed(6)} TON</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>1 RUB =</span>
+                  <span>{(1 / (exchangeRates.RUB || 1)).toFixed(6)} TON</span>
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Settlement Validation */}
+            <div>
+              <h4 className="font-medium mb-2">Settlement Validation</h4>
+              <div className="space-y-2 text-sm">
+                                 <div className="flex items-center justify-between">
+                   <span>Plan Valid:</span>
+                   <Badge variant="secondary">
+                     Checking...
+                   </Badge>
+                 </div>
+                <div className="flex items-center justify-between">
+                  <span>All Wallets Connected:</span>
+                  <Badge variant={settlementPlan.missingWallets.length === 0 ? 'default' : 'destructive'}>
+                    {settlementPlan.missingWallets.length === 0 ? 'Yes' : 'No'}
+                  </Badge>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Estimated Gas:</span>
+                  <span>{currencyManager.formatAmount(estimatedFees, currency)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Missing Wallets */}
+            {settlementPlan.missingWallets.length > 0 && (
+              <>
+                <Separator />
+                <div>
+                  <h4 className="font-medium mb-2">Missing Wallet Connections</h4>
+                  <div className="space-y-1">
+                    {settlementPlan.missingWallets.map((telegramId) => (
+                      <div key={telegramId} className="text-sm text-muted-foreground">
+                        • {getParticipantName(telegramId)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </CardContent>
+        )}
+      </Card>
 
       {/* Execute Button */}
       <div className="flex justify-center">

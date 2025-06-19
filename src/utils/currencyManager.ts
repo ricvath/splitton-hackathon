@@ -81,51 +81,121 @@ export class CurrencyManager {
   private async fetchExchangeRate(currency: string): Promise<number> {
     const upperCurrency = currency.toUpperCase();
     
-    try {
-      // Try CoinGecko API first (free tier)
-      const response = await fetch(
-        `https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=${upperCurrency}`,
-        { 
-          method: 'GET',
-          headers: {
-            'Accept': 'application/json',
-          },
-        }
-      );
+    // Enhanced retry logic with multiple API sources
+    const apiSources = [
+      () => this.fetchFromCoinGecko(upperCurrency),
+      () => this.fetchFromCoinMarketCap(upperCurrency),
+      () => this.fetchFromExchangeRateAPI(upperCurrency),
+    ];
 
-      if (response.ok) {
-        const data = await response.json();
-        const tonPrice = data['the-open-network']?.[currency.toLowerCase()];
+    for (const apiCall of apiSources) {
+      try {
+        const rate = await this.retryWithBackoff(apiCall, 3);
+        if (rate > 0) {
+          return rate;
+        }
+      } catch (error) {
+        console.warn(`API call failed, trying next source:`, error);
+      }
+    }
+
+    throw new Error(`Unable to fetch exchange rate for ${currency} from any source`);
+  }
+
+  private async retryWithBackoff<T>(
+    operation: () => Promise<T>, 
+    maxRetries: number, 
+    baseDelay: number = 1000
+  ): Promise<T> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        if (attempt === maxRetries) {
+          throw error;
+        }
         
-        if (tonPrice && tonPrice > 0) {
-          return 1 / tonPrice; // Convert to TON rate (how many TON per 1 currency unit)
-        }
+        const delay = baseDelay * Math.pow(2, attempt - 1); // Exponential backoff
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
-    } catch (error) {
-      console.warn('CoinGecko API failed, trying alternative:', error);
+    }
+    throw new Error('Max retries exceeded');
+  }
+
+  private async fetchFromCoinGecko(currency: string): Promise<number> {
+    const response = await fetch(
+      `https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=${currency}`,
+      { 
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'SplitTON-App/1.0',
+        },
+        signal: AbortSignal.timeout(10000), // 10 second timeout
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`CoinGecko API error: ${response.status}`);
     }
 
-    // Fallback to exchange rate API for fiat currencies
-    try {
-      if (['USD', 'EUR', 'GBP', 'JPY', 'RUB'].includes(upperCurrency)) {
-        const response = await fetch(
-          `https://api.exchangerate-api.com/v4/latest/USD`
-        );
+    const data = await response.json();
+    const tonPrice = data['the-open-network']?.[currency.toLowerCase()];
+    
+    if (tonPrice && tonPrice > 0) {
+      return 1 / tonPrice; // Convert to TON rate
+    }
+    
+    throw new Error('Invalid price data from CoinGecko');
+  }
 
-        if (response.ok) {
-          const data = await response.json();
-          const fiatRate = data.rates[upperCurrency] || 1;
-          
-          // Assume 1 TON = $2 as fallback (this should be updated with real TON price)
-          const tonUsdPrice = 2;
-          return fiatRate / tonUsdPrice;
-        }
+  private async fetchFromCoinMarketCap(currency: string): Promise<number> {
+    // Alternative API source (would need API key for production)
+    const response = await fetch(
+      `https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=TON&convert=${currency}`,
+      {
+        headers: {
+          'Accept': 'application/json',
+          'X-CMC_PRO_API_KEY': 'demo-key', // Replace with real key
+        },
+        signal: AbortSignal.timeout(10000),
       }
-    } catch (error) {
-      console.warn('Exchange rate API failed:', error);
+    );
+
+    if (!response.ok) {
+      throw new Error(`CoinMarketCap API error: ${response.status}`);
     }
 
-    throw new Error(`Unable to fetch exchange rate for ${currency}`);
+    const data = await response.json();
+    const tonPrice = data.data?.TON?.quote?.[currency]?.price;
+    
+    if (tonPrice && tonPrice > 0) {
+      return 1 / tonPrice;
+    }
+    
+    throw new Error('Invalid price data from CoinMarketCap');
+  }
+
+  private async fetchFromExchangeRateAPI(currency: string): Promise<number> {
+    if (!['USD', 'EUR', 'GBP', 'JPY', 'RUB'].includes(currency)) {
+      throw new Error(`Currency ${currency} not supported by exchange rate API`);
+    }
+
+    const response = await fetch(
+      `https://api.exchangerate-api.com/v4/latest/USD`,
+      { signal: AbortSignal.timeout(10000) }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Exchange Rate API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const fiatRate = data.rates[currency] || 1;
+    
+    // Use a more realistic TON price (this should ideally come from a crypto API)
+    const tonUsdPrice = 2.5; // Fallback price
+    return fiatRate / tonUsdPrice;
   }
 
   async convertToTon(amount: number, currency: string): Promise<number> {

@@ -1,4 +1,6 @@
-import { tonConnectManager, Settlement } from '../ton/connect';
+// Dynamic import to avoid Buffer issues
+type TonConnectManager = any;
+type Settlement = any;
 import { currencyManager } from './currencyManager';
 import { CloudParticipant } from '../storage/types';
 
@@ -21,6 +23,17 @@ export interface SettlementResult {
   success: boolean;
   transactionHash?: string;
   error?: string;
+  timestamp?: number;
+  gasUsed?: number;
+  settlement?: Settlement;
+}
+
+export interface SettlementProgress {
+  completed: number;
+  total: number;
+  currentSettlement?: Settlement;
+  results: SettlementResult[];
+  status: 'preparing' | 'executing' | 'completed' | 'failed';
 }
 
 export class SettlementManager {
@@ -155,16 +168,41 @@ export class SettlementManager {
   }
 
   /**
-   * Execute a single settlement
+   * Execute a single settlement with enhanced tracking
    */
   async executeSettlement(settlement: Settlement): Promise<SettlementResult> {
+    const startTime = Date.now();
+    
     try {
+      // Dynamic import TON Connect manager
+      const { tonConnectManager } = await import('../ton/connect');
+      
       if (!tonConnectManager.isWalletConnected()) {
         return {
           success: false,
           error: 'Wallet not connected',
+          timestamp: startTime,
+          settlement,
         };
       }
+
+      // Validate settlement before execution
+      const validationError = this.validateSettlement(settlement);
+      if (validationError) {
+        return {
+          success: false,
+          error: validationError,
+          timestamp: startTime,
+          settlement,
+        };
+      }
+
+      console.log('Executing settlement:', {
+        from: settlement.from,
+        to: settlement.to,
+        amount: settlement.amountTon,
+        currency: settlement.currency,
+      });
 
       const transactionHash = await tonConnectManager.sendSettlement(settlement);
       
@@ -172,11 +210,15 @@ export class SettlementManager {
         return {
           success: true,
           transactionHash,
+          timestamp: Date.now(),
+          settlement,
         };
       } else {
         return {
           success: false,
-          error: 'Transaction failed',
+          error: 'Transaction failed - no hash returned',
+          timestamp: Date.now(),
+          settlement,
         };
       }
     } catch (error) {
@@ -184,37 +226,86 @@ export class SettlementManager {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: Date.now(),
+        settlement,
       };
     }
   }
 
   /**
-   * Execute multiple settlements in sequence
+   * Validate a settlement before execution
+   */
+  private validateSettlement(settlement: Settlement): string | null {
+    if (!settlement.from || !settlement.to) {
+      return 'Invalid wallet addresses';
+    }
+
+    if (settlement.amountTon <= 0) {
+      return 'Invalid settlement amount';
+    }
+
+    if (settlement.from === settlement.to) {
+      return 'Cannot settle to the same wallet';
+    }
+
+    // Basic TON address validation (simplified)
+    const tonAddressRegex = /^[0-9a-fA-F]{48}$/;
+    if (!tonAddressRegex.test(settlement.from.replace(/[^0-9a-fA-F]/g, ''))) {
+      return 'Invalid sender wallet address format';
+    }
+
+    if (!tonAddressRegex.test(settlement.to.replace(/[^0-9a-fA-F]/g, ''))) {
+      return 'Invalid recipient wallet address format';
+    }
+
+    return null;
+  }
+
+  /**
+   * Execute multiple settlements in sequence with enhanced progress tracking
    */
   async executeSettlementPlan(
     plan: SettlementPlan,
-    onProgress?: (completed: number, total: number) => void
+    onProgress?: (progress: SettlementProgress) => void
   ): Promise<SettlementResult[]> {
     if (!plan.canExecute) {
       throw new Error('Settlement plan cannot be executed - missing wallet connections');
     }
 
     const results: SettlementResult[] = [];
+    const progress: SettlementProgress = {
+      completed: 0,
+      total: plan.settlements.length,
+      results: [],
+      status: 'preparing',
+    };
+
+    // Notify initial progress
+    onProgress?.(progress);
+
+    progress.status = 'executing';
+    onProgress?.(progress);
     
     for (let i = 0; i < plan.settlements.length; i++) {
       const settlement = plan.settlements[i];
       
-      // Notify progress
-      onProgress?.(i, plan.settlements.length);
+      // Update current settlement in progress
+      progress.currentSettlement = settlement;
+      onProgress?.(progress);
       
       const result = await this.executeSettlement(settlement);
       results.push(result);
+      progress.results.push(result);
+      progress.completed = i + 1;
       
       // If a settlement fails, you might want to continue or stop
       // For now, we continue with all settlements
       if (!result.success) {
         console.warn('Settlement failed:', settlement, result.error);
       }
+      
+      // Update progress after each settlement
+      onProgress?.(progress);
       
       // Add delay between transactions to avoid rate limiting
       if (i < plan.settlements.length - 1) {
@@ -223,7 +314,9 @@ export class SettlementManager {
     }
     
     // Final progress update
-    onProgress?.(plan.settlements.length, plan.settlements.length);
+    progress.status = results.every(r => r.success) ? 'completed' : 'failed';
+    progress.currentSettlement = undefined;
+    onProgress?.(progress);
     
     return results;
   }
@@ -265,15 +358,21 @@ export class SettlementManager {
   /**
    * Validate wallet addresses in settlement plan
    */
-  validateSettlementPlan(plan: SettlementPlan): boolean {
-    return plan.settlements.every(settlement => {
-      return (
-        tonConnectManager.isValidTonAddress(settlement.from) &&
-        tonConnectManager.isValidTonAddress(settlement.to) &&
-        settlement.amountTon > 0 &&
-        settlement.amountFiat > 0
-      );
-    });
+  async validateSettlementPlan(plan: SettlementPlan): Promise<boolean> {
+    try {
+      const { tonConnectManager } = await import('../ton/connect');
+      return plan.settlements.every(settlement => {
+        return (
+          tonConnectManager.isValidTonAddress(settlement.from) &&
+          tonConnectManager.isValidTonAddress(settlement.to) &&
+          settlement.amountTon > 0 &&
+          settlement.amountFiat > 0
+        );
+      });
+    } catch (error) {
+      console.warn('TON Connect not available for validation:', error);
+      return false;
+    }
   }
 
   /**

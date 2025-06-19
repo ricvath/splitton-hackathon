@@ -3,7 +3,7 @@ import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Alert, AlertDescription } from './ui/alert';
-import { Loader2, Wallet, Copy, ExternalLink, RefreshCw } from 'lucide-react';
+import { Loader2, Wallet, Copy, ExternalLink, RefreshCw, AlertTriangle } from 'lucide-react';
 import { useTonConnect } from '../hooks/useTonConnect';
 import { toast } from 'sonner';
 
@@ -34,16 +34,26 @@ export const TonWalletConnect: React.FC<TonWalletConnectProps> = ({
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const handleConnect = async () => {
-    const success = await connectWallet();
-    if (success && wallet?.address) {
-      onWalletConnected?.(wallet.address);
-      toast.success('Wallet connected successfully!');
+    try {
+      const success = await connectWallet();
+      if (success && wallet?.address) {
+        onWalletConnected?.(wallet.address);
+        toast.success('Wallet connected successfully!');
+      }
+    } catch (err) {
+      console.error('Wallet connection error:', err);
+      toast.error('Failed to connect wallet');
     }
   };
 
   const handleDisconnect = async () => {
-    await disconnectWallet();
-    toast.info('Wallet disconnected');
+    try {
+      await disconnectWallet();
+      toast.info('Wallet disconnected');
+    } catch (err) {
+      console.error('Wallet disconnection error:', err);
+      toast.error('Failed to disconnect wallet');
+    }
   };
 
   const handleCopyAddress = async () => {
@@ -58,10 +68,15 @@ export const TonWalletConnect: React.FC<TonWalletConnectProps> = ({
   };
 
   const handleRefreshBalance = async () => {
-    setIsRefreshing(true);
-    await refreshBalance();
-    setIsRefreshing(false);
-    toast.success('Balance refreshed');
+    try {
+      setIsRefreshing(true);
+      await refreshBalance();
+      setIsRefreshing(false);
+      toast.success('Balance refreshed');
+    } catch (err) {
+      setIsRefreshing(false);
+      toast.error('Failed to refresh balance');
+    }
   };
 
   const openInExplorer = () => {
@@ -69,6 +84,33 @@ export const TonWalletConnect: React.FC<TonWalletConnectProps> = ({
       window.open(`https://tonscan.org/address/${wallet.address}`, '_blank');
     }
   };
+
+  // Show error state if TON Connect is not available
+  if (error?.includes('TON Connect not available')) {
+    return (
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-yellow-500" />
+            TON Wallet (Unavailable)
+          </CardTitle>
+          <CardDescription>
+            TON Connect is currently unavailable. This may be due to network issues or browser compatibility.
+          </CardDescription>
+        </CardHeader>
+        
+        <CardContent>
+          <Alert>
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>
+              TON wallet functionality is temporarily unavailable. You can still use the app for expense tracking, 
+              but cryptocurrency settlements won't be available.
+            </AlertDescription>
+          </Alert>
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (compact && isConnected) {
     return (
@@ -111,7 +153,7 @@ export const TonWalletConnect: React.FC<TonWalletConnectProps> = ({
       </CardHeader>
       
       <CardContent className="space-y-4">
-        {error && (
+        {error && !error.includes('TON Connect not available') && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
           </Alert>
@@ -198,11 +240,9 @@ export const TonWalletConnect: React.FC<TonWalletConnectProps> = ({
           </div>
         )}
 
-        {/* Connection Status */}
-        <div className="flex items-center justify-center">
-          <Badge variant={isConnected ? "default" : "secondary"}>
-            {isConnected ? "Connected" : "Not Connected"}
-          </Badge>
+        {/* Development Notice */}
+        <div className="text-xs text-muted-foreground text-center">
+          TON Connect integration for secure wallet connections
         </div>
       </CardContent>
     </Card>

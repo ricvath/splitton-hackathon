@@ -1,6 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import { tonConnectManager, WalletInfo, Settlement } from '../ton/connect';
 import { currencyManager } from '../utils/currencyManager';
+
+// Dynamic import types
+type TonConnectManager = any;
+type WalletInfo = any;
+type Settlement = any;
 
 export interface UseTonConnectReturn {
   // Wallet state
@@ -32,19 +36,54 @@ export const useTonConnect = (): UseTonConnectReturn => {
   const [error, setError] = useState<string | null>(null);
   const [balance, setBalance] = useState('0');
   const [balanceUsd, setBalanceUsd] = useState('$0.00');
+  const [tonConnectManager, setTonConnectManager] = useState<TonConnectManager | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  // Dynamically load TON Connect to avoid Buffer issues on initial load
+  const loadTonConnect = useCallback(async () => {
+    if (tonConnectManager) return tonConnectManager;
+    
+    try {
+      console.log('Loading TON Connect module...');
+      const { tonConnectManager: manager } = await import('../ton/connect');
+      setTonConnectManager(manager);
+      return manager;
+    } catch (err) {
+      console.error('Failed to load TON Connect module:', err);
+      setError('TON Connect not available');
+      return null;
+    }
+  }, [tonConnectManager]);
 
   // Initialize TON Connect and check for existing connection
   useEffect(() => {
     const initializeTonConnect = async () => {
+      if (isInitialized) return;
+      
       try {
-        await tonConnectManager.init();
+        const manager = await loadTonConnect();
+        if (!manager) return;
+        
+        await manager.init();
+        setIsInitialized(true);
         
         // Check if wallet is already connected
-        const walletInfo = tonConnectManager.getWalletInfo();
+        const walletInfo = manager.getWalletInfo();
         if (walletInfo) {
           setWallet(walletInfo);
-          await refreshBalance();
+          await refreshBalanceInternal(manager, walletInfo);
         }
+
+        // Listen for wallet changes
+        manager.onWalletChange((walletInfo: WalletInfo) => {
+          setWallet(walletInfo);
+          if (walletInfo) {
+            refreshBalanceInternal(manager, walletInfo);
+          } else {
+            setBalance('0');
+            setBalanceUsd('$0.00');
+          }
+        });
       } catch (err) {
         console.error('Failed to initialize TON Connect:', err);
         setError(err instanceof Error ? err.message : 'Failed to initialize wallet');
@@ -52,18 +91,23 @@ export const useTonConnect = (): UseTonConnectReturn => {
     };
 
     initializeTonConnect();
+  }, [isInitialized, loadTonConnect]);
 
-    // Listen for wallet changes
-    tonConnectManager.onWalletChange((walletInfo) => {
-      setWallet(walletInfo);
-      if (walletInfo) {
-        refreshBalance();
-      } else {
-        setBalance('0');
-        setBalanceUsd('$0.00');
-      }
-    });
-  }, []);
+  const refreshBalanceInternal = async (manager: TonConnectManager, walletInfo: WalletInfo) => {
+    if (!walletInfo?.address) return;
+
+    try {
+      const tonBalance = await manager.getWalletBalance(walletInfo.address);
+      setBalance(tonBalance);
+
+      // Convert to USD for display
+      const usdValue = await currencyManager.convertFromTon(parseFloat(tonBalance), 'USD');
+      setBalanceUsd(currencyManager.formatAmount(usdValue, 'USD'));
+    } catch (err) {
+      console.error('Failed to refresh balance:', err);
+      // Don't set error for balance refresh failures
+    }
+  };
 
   const connectWallet = useCallback(async (): Promise<boolean> => {
     if (isConnecting) return false;
@@ -72,11 +116,17 @@ export const useTonConnect = (): UseTonConnectReturn => {
     setError(null);
 
     try {
-      const walletInfo = await tonConnectManager.connectWallet();
+      const manager = await loadTonConnect();
+      if (!manager) {
+        setError('TON Connect not available');
+        return false;
+      }
+
+      const walletInfo = await manager.connectWallet();
       
       if (walletInfo) {
         setWallet(walletInfo);
-        await refreshBalance();
+        await refreshBalanceInternal(manager, walletInfo);
         return true;
       } else {
         setError('Failed to connect wallet');
@@ -90,11 +140,14 @@ export const useTonConnect = (): UseTonConnectReturn => {
     } finally {
       setIsConnecting(false);
     }
-  }, [isConnecting]);
+  }, [isConnecting, loadTonConnect]);
 
   const disconnectWallet = useCallback(async (): Promise<void> => {
     try {
-      await tonConnectManager.disconnectWallet();
+      const manager = await loadTonConnect();
+      if (manager) {
+        await manager.disconnectWallet();
+      }
       setWallet(null);
       setBalance('0');
       setBalanceUsd('$0.00');
@@ -103,23 +156,12 @@ export const useTonConnect = (): UseTonConnectReturn => {
       console.error('Failed to disconnect wallet:', err);
       setError(err instanceof Error ? err.message : 'Failed to disconnect wallet');
     }
-  }, []);
+  }, [loadTonConnect]);
 
   const refreshBalance = useCallback(async (): Promise<void> => {
-    if (!wallet?.address) return;
-
-    try {
-      const tonBalance = await tonConnectManager.getWalletBalance(wallet.address);
-      setBalance(tonBalance);
-
-      // Convert to USD for display
-      const usdValue = await currencyManager.convertFromTon(parseFloat(tonBalance), 'USD');
-      setBalanceUsd(currencyManager.formatAmount(usdValue, 'USD'));
-    } catch (err) {
-      console.error('Failed to refresh balance:', err);
-      // Don't set error for balance refresh failures
-    }
-  }, [wallet?.address]);
+    if (!wallet?.address || !tonConnectManager) return;
+    await refreshBalanceInternal(tonConnectManager, wallet);
+  }, [wallet, tonConnectManager]);
 
   const sendSettlement = useCallback(async (settlement: Settlement): Promise<string | null> => {
     if (!wallet) {
@@ -127,14 +169,20 @@ export const useTonConnect = (): UseTonConnectReturn => {
       return null;
     }
 
+    const manager = await loadTonConnect();
+    if (!manager) {
+      setError('TON Connect not available');
+      return null;
+    }
+
     setError(null);
 
     try {
-      const result = await tonConnectManager.sendSettlement(settlement);
+      const result = await manager.sendSettlement(settlement);
       
       if (result) {
         // Refresh balance after successful transaction
-        setTimeout(() => refreshBalance(), 2000);
+        setTimeout(() => refreshBalanceInternal(manager, wallet), 2000);
         return result;
       } else {
         setError('Transaction failed');
@@ -146,15 +194,17 @@ export const useTonConnect = (): UseTonConnectReturn => {
       console.error('Settlement failed:', err);
       return null;
     }
-  }, [wallet, refreshBalance]);
+  }, [wallet, loadTonConnect]);
 
   const formatAddress = useCallback((address: string): string => {
+    if (!tonConnectManager) return address;
     return tonConnectManager.formatAddress(address);
-  }, []);
+  }, [tonConnectManager]);
 
   const isValidAddress = useCallback((address: string): boolean => {
+    if (!tonConnectManager) return false;
     return tonConnectManager.isValidTonAddress(address);
-  }, []);
+  }, [tonConnectManager]);
 
   return {
     // Wallet state
