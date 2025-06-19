@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { currencyManager } from '../utils/currencyManager';
+import type { TonConnectManager, WalletInfo, Settlement } from '../ton/connect';
 
-// Dynamic import types
-type TonConnectManager = any;
-type WalletInfo = any;
-type Settlement = any;
+// Dynamic import types for the manager when loaded
+type LoadedTonConnectManager = TonConnectManager;
 
 export interface UseTonConnectReturn {
   // Wallet state
@@ -36,7 +35,7 @@ export const useTonConnect = (): UseTonConnectReturn => {
   const [error, setError] = useState<string | null>(null);
   const [balance, setBalance] = useState('0');
   const [balanceUsd, setBalanceUsd] = useState('$0.00');
-  const [tonConnectManager, setTonConnectManager] = useState<TonConnectManager | null>(null);
+  const [tonConnectManager, setTonConnectManager] = useState<LoadedTonConnectManager | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
 
   // Dynamically load TON Connect to avoid Buffer issues on initial load
@@ -71,6 +70,7 @@ export const useTonConnect = (): UseTonConnectReturn => {
         // Check if wallet is already connected
         const walletInfo = manager.getWalletInfo();
         if (walletInfo) {
+          console.log('useTonConnect: Wallet info:', walletInfo);
           setWallet(walletInfo);
           await refreshBalanceInternal(manager, walletInfo);
         }
@@ -94,7 +94,7 @@ export const useTonConnect = (): UseTonConnectReturn => {
     initializeTonConnect();
   }, [isInitialized, loadTonConnect]);
 
-  const refreshBalanceInternal = async (manager: TonConnectManager, walletInfo: WalletInfo) => {
+  const refreshBalanceInternal = async (manager: LoadedTonConnectManager, walletInfo: WalletInfo) => {
     if (!walletInfo?.address) return;
 
     try {
