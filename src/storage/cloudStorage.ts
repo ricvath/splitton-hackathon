@@ -134,7 +134,20 @@ export class CloudStorageManager {
         return [];
       }
       
-      const eventIdList: string[] = JSON.parse(eventIds);
+      let eventIdList: string[] = [];
+      try {
+        const parsed = JSON.parse(eventIds);
+        if (Array.isArray(parsed)) {
+          eventIdList = parsed;
+        } else {
+          console.warn('[CloudStorage] Event IDs is not an array, returning empty list');
+          return [];
+        }
+      } catch (parseError) {
+        console.error('[CloudStorage] Error parsing event IDs:', parseError);
+        return [];
+      }
+      
       const events: CloudEvent[] = [];
       
       // Fetch each event
@@ -172,7 +185,19 @@ export class CloudStorageManager {
       
       let eventIds: string[] = [];
       if (existingIds) {
-        eventIds = JSON.parse(existingIds);
+        try {
+          const parsed = JSON.parse(existingIds);
+          // Ensure parsed data is an array
+          if (Array.isArray(parsed)) {
+            eventIds = parsed;
+          } else {
+            console.warn('[CloudStorage] Event IDs is not an array, initializing as empty array');
+            eventIds = [];
+          }
+        } catch (parseError) {
+          console.error('[CloudStorage] Error parsing event IDs, initializing as empty array:', parseError);
+          eventIds = [];
+        }
       }
       
       // Add event ID if not already present
@@ -194,9 +219,23 @@ export class CloudStorageManager {
       const existingIds = await this.getItem(eventIdsKey);
       
       if (existingIds) {
-        let eventIds: string[] = JSON.parse(existingIds);
-        eventIds = eventIds.filter(id => id !== eventId);
-        await this.setItem(eventIdsKey, JSON.stringify(eventIds));
+        try {
+          let eventIds = JSON.parse(existingIds);
+          
+          // Ensure eventIds is an array
+          if (!Array.isArray(eventIds)) {
+            console.warn('[CloudStorage] Event IDs is not an array, initializing as empty array');
+            eventIds = [];
+          }
+          
+          // Filter out the event ID
+          eventIds = eventIds.filter(id => id !== eventId);
+          await this.setItem(eventIdsKey, JSON.stringify(eventIds));
+        } catch (parseError) {
+          console.error('[CloudStorage] Error parsing event IDs, initializing as empty array:', parseError);
+          // If parsing fails, just remove the corrupted data
+          await this.setItem(eventIdsKey, JSON.stringify([]));
+        }
       }
     } catch (error) {
       console.error('[CloudStorage] Error removing user from event:', error);
