@@ -57,10 +57,46 @@ export class TonConnectManager {
 
   async getWallets(): Promise<Wallet[]> {
     try {
-      return await this.connector.getWallets();
+      const wallets = await this.connector.getWallets();
+      console.log('Available wallets:', wallets.map(w => ({ name: w.name, bridge: w.bridgeUrl, injected: w.injected })));
+      
+      // Filter out injected wallets that aren't actually available
+      const availableWallets = wallets.filter(wallet => {
+        if (wallet.injected) {
+          // Check if the injected wallet is actually available
+          const isInjected = this.checkInjectedWallet(wallet);
+          console.log(`Wallet ${wallet.name} injected check:`, isInjected);
+          return isInjected;
+        }
+        // Non-injected wallets (like mobile wallets) are always available
+        return true;
+      });
+      
+      console.log('Filtered available wallets:', availableWallets.map(w => w.name));
+      return availableWallets;
     } catch (error) {
       console.error('Failed to get wallets:', error);
       return [];
+    }
+  }
+
+  private checkInjectedWallet(wallet: Wallet): boolean {
+    try {
+      // Check for common TON wallet injections
+      if (wallet.name.toLowerCase().includes('tonkeeper')) {
+        return !!(window as any).tonkeeper;
+      }
+      if (wallet.name.toLowerCase().includes('openmask')) {
+        return !!(window as any).ton;
+      }
+      if (wallet.name.toLowerCase().includes('tonwallet')) {
+        return !!(window as any).tonwallet;
+      }
+      
+      // Generic check for TON injection
+      return !!(window as any).ton || !!(window as any).tonkeeper || !!(window as any).tonwallet;
+    } catch {
+      return false;
     }
   }
 
@@ -77,12 +113,24 @@ export class TonConnectManager {
         console.log('Available wallets:', wallets.length);
         
         if (wallets.length === 0) {
-          throw new Error('No TON wallets found. Please install a TON wallet like Tonkeeper, OpenMask, or TON Wallet.');
+          throw new Error('No TON wallets available. Please install a TON wallet extension like Tonkeeper, or use a mobile wallet by opening this app in Telegram on your phone.');
         }
         
-        // Prefer Tonkeeper if available, otherwise use first wallet
-        targetWallet = wallets.find(w => w.name.toLowerCase().includes('tonkeeper')) || wallets[0];
-        console.log('Selected wallet:', targetWallet.name);
+        // Prefer non-injected wallets (mobile) over injected ones if no injected wallets are available
+        const injectedWallets = wallets.filter(w => w.injected && this.checkInjectedWallet(w));
+        const mobileWallets = wallets.filter(w => !w.injected);
+        
+        if (injectedWallets.length > 0) {
+          // Prefer Tonkeeper if available, otherwise use first injected wallet
+          targetWallet = injectedWallets.find(w => w.name.toLowerCase().includes('tonkeeper')) || injectedWallets[0];
+          console.log('Selected injected wallet:', targetWallet.name);
+        } else if (mobileWallets.length > 0) {
+          // Use mobile wallet (will open QR code or deep link)
+          targetWallet = mobileWallets.find(w => w.name.toLowerCase().includes('tonkeeper')) || mobileWallets[0];
+          console.log('Selected mobile wallet:', targetWallet.name);
+        } else {
+          throw new Error('No compatible TON wallets found. Please install Tonkeeper or another TON wallet.');
+        }
       }
 
       console.log('Connecting to wallet:', targetWallet.name);
@@ -102,6 +150,10 @@ export class TonConnectManager {
           throw new Error('No TON wallet found. Please install Tonkeeper or another TON wallet.');
         } else if (error.message.includes('timeout')) {
           throw new Error('Connection timeout. Please try again.');
+        } else if (error.message.includes('injected wallet while it is not exists')) {
+          throw new Error('TON wallet extension not detected. Please install Tonkeeper browser extension or use a mobile wallet.');
+        } else if (error.message.includes('TON_CONNECT_SDK_ERROR')) {
+          throw new Error('TON Connect error. Please make sure you have a TON wallet installed and try again.');
         }
         throw error;
       }

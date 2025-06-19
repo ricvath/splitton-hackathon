@@ -6,6 +6,7 @@ import { Alert, AlertDescription } from './ui/alert';
 import { Loader2, Wallet, Copy, ExternalLink, RefreshCw, AlertTriangle } from 'lucide-react';
 import { useTonConnect } from '../hooks/useTonConnect';
 import { toast } from 'sonner';
+import WalletDebugInfo from './WalletDebugInfo';
 
 interface TonWalletConnectProps {
   onWalletConnected?: (address: string) => void;
@@ -110,9 +111,10 @@ export const TonWalletConnect: React.FC<TonWalletConnectProps> = ({
           <div className="text-sm text-muted-foreground">
             <p className="font-medium mb-2">To use TON wallet features:</p>
             <ul className="list-disc list-inside space-y-1">
-              <li>Install a TON wallet like Tonkeeper</li>
-              <li>Make sure you're using a supported browser</li>
-              <li>Check your internet connection</li>
+              <li>Install <a href="https://tonkeeper.com" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Tonkeeper browser extension</a></li>
+              <li>Or use Tonkeeper mobile app and open this page in Telegram on your phone</li>
+              <li>Make sure you're using a supported browser (Chrome, Firefox, Safari)</li>
+              <li>Refresh the page after installing a wallet</li>
             </ul>
           </div>
           
@@ -124,6 +126,8 @@ export const TonWalletConnect: React.FC<TonWalletConnectProps> = ({
             <RefreshCw className="mr-2 h-4 w-4" />
             Retry Connection
           </Button>
+          
+          <WalletDebugInfo className="mt-4" />
         </CardContent>
       </Card>
     );
